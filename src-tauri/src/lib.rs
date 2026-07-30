@@ -5,7 +5,6 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
@@ -59,8 +58,6 @@ pub struct GameSession {
     pub start_time: DateTime<Utc>,
     pub exe_path: String,
 }
-
-static APP_STATE: Lazy<Option<AppState>> = Lazy::new(|| None);
 
 // ─────────────────────────────────────────────
 // Database Helpers

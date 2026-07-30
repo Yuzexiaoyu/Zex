@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use once_cell::sync::Lazy;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
-use tauri::{AppHandle, Manager, State};
+use tauri::{Manager, State};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -48,7 +48,7 @@ pub type AppResult<T> = Result<T, AppError>;
 // ─────────────────────────────────────────────
 
 pub struct AppState {
-    db: Arc<RwLock<Connection>>,
+    db: Arc<Mutex<Connection>>,
     running_games: Arc<RwLock<HashMap<String, GameSession>>>,
     data_dir: PathBuf,
 }
@@ -327,7 +327,7 @@ pub struct CoverSearchResult {
 
 #[tauri::command]
 fn get_all_games(state: State<'_, AppState>) -> AppResult<Vec<Game>> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     let mut stmt = conn.prepare(
         "SELECT id, name, platform, install_dir, exe_path, launch_args, env_vars, work_dir,
                 cover_path, banner_path, bg_path, rating, notes, tags, favorite, hidden,
@@ -363,7 +363,7 @@ fn get_all_games(state: State<'_, AppState>) -> AppResult<Vec<Game>> {
 
 #[tauri::command]
 fn get_game(state: State<'_, AppState>, id: String) -> AppResult<Game> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     let game = conn.query_row(
         "SELECT id, name, platform, install_dir, exe_path, launch_args, env_vars, work_dir,
                 cover_path, banner_path, bg_path, rating, notes, tags, favorite, hidden,
@@ -403,7 +403,7 @@ fn create_game(state: State<'_, AppState>, mut game: Game) -> AppResult<Game> {
     if game.id.is_empty() {
         game.id = Uuid::new_v4().to_string();
     }
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute(
         "INSERT INTO games (id, name, platform, install_dir, exe_path, launch_args, env_vars,
          work_dir, cover_path, banner_path, bg_path, rating, notes, tags, favorite, hidden,
@@ -422,7 +422,7 @@ fn create_game(state: State<'_, AppState>, mut game: Game) -> AppResult<Game> {
 
 #[tauri::command]
 fn update_game(state: State<'_, AppState>, game: Game) -> AppResult<Game> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute(
         "UPDATE games SET name = ?, platform = ?, install_dir = ?, exe_path = ?, launch_args = ?,
          env_vars = ?, work_dir = ?, cover_path = ?, banner_path = ?, bg_path = ?, rating = ?,
@@ -441,14 +441,14 @@ fn update_game(state: State<'_, AppState>, game: Game) -> AppResult<Game> {
 
 #[tauri::command]
 fn delete_game(state: State<'_, AppState>, id: String) -> AppResult<()> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute("DELETE FROM games WHERE id = ?", [&id])?;
     Ok(())
 }
 
 #[tauri::command]
 fn filter_games(state: State<'_, AppState>, filter: GameFilter) -> AppResult<Vec<Game>> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     let mut sql = String::from(
         "SELECT id, name, platform, install_dir, exe_path, launch_args, env_vars, work_dir,
                 cover_path, banner_path, bg_path, rating, notes, tags, favorite, hidden,
@@ -649,11 +649,11 @@ fn import_steam_games(state: State<'_, AppState>, steam_games: Vec<SteamGame>) -
             id: Uuid::new_v4().to_string(),
             name: sg.name,
             platform: "PC".to_string(),
-            install_dir: sg.install_dir,
+            install_dir: sg.install_dir.clone(),
             exe_path: sg.exe_path,
             launch_args: format!("-applaunch {}", sg.app_id),
             env_vars: "{}".to_string(),
-            work_dir: sg.install_dir.clone(),
+            work_dir: sg.install_dir,
             cover_path: String::new(),
             banner_path: String::new(),
             bg_path: String::new(),
@@ -667,7 +667,7 @@ fn import_steam_games(state: State<'_, AppState>, steam_games: Vec<SteamGame>) -
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };
-        let conn = state.db.read();
+        let conn = state.db.lock();
         conn.execute(
             "INSERT OR IGNORE INTO games (id, name, platform, install_dir, exe_path, launch_args,
              env_vars, work_dir, cover_path, banner_path, bg_path, rating, notes, tags,
@@ -735,7 +735,7 @@ fn launch_game(state: State<'_, AppState>, game_id: String) -> AppResult<String>
 
     // 更新 play_count
     {
-        let conn = state.db.read();
+        let conn = state.db.lock();
         conn.execute(
             "UPDATE games SET play_count = play_count + 1 WHERE id = ?",
             [&game_id],
@@ -784,7 +784,7 @@ fn on_game_exit(state: State<'_, AppState>, game_id: String) -> AppResult<GameSe
 
         // 更新游戏总时长
         {
-            let conn = state.db.read();
+            let conn = state.db.lock();
             conn.execute(
                 "UPDATE games SET total_seconds = total_seconds + ? WHERE id = ?",
                 params![duration, game_id],
@@ -793,7 +793,7 @@ fn on_game_exit(state: State<'_, AppState>, game_id: String) -> AppResult<GameSe
 
         // 写入会话记录
         {
-            let conn = state.db.read();
+            let conn = state.db.lock();
             conn.execute(
                 "INSERT INTO game_sessions (id, game_id, start_time, end_time, duration_seconds, exit_code, crashed)
                  VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -812,7 +812,7 @@ fn on_game_exit(state: State<'_, AppState>, game_id: String) -> AppResult<GameSe
 
 #[tauri::command]
 fn get_game_sessions(state: State<'_, AppState>, game_id: String) -> AppResult<Vec<GameSessionRecord>> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     let mut stmt = conn.prepare(
         "SELECT id, game_id, start_time, end_time, duration_seconds, exit_code, crashed
          FROM game_sessions WHERE game_id = ? ORDER BY start_time DESC"
@@ -837,7 +837,7 @@ fn get_game_sessions(state: State<'_, AppState>, game_id: String) -> AppResult<V
 
 #[tauri::command]
 fn get_all_series(state: State<'_, AppState>) -> AppResult<Vec<Series>> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     let mut stmt = conn.prepare(
         "SELECT id, title, aliases, overview, poster_path, bg_path, first_air_date, status,
                 tmdb_id, tvdb_id, tags, favorite, created_at, updated_at
@@ -869,7 +869,7 @@ fn create_series(state: State<'_, AppState>, mut series: Series) -> AppResult<Se
     if series.id.is_empty() {
         series.id = Uuid::new_v4().to_string();
     }
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute(
         "INSERT INTO series (id, title, aliases, overview, poster_path, bg_path, first_air_date,
          status, tmdb_id, tvdb_id, tags, favorite)
@@ -881,7 +881,7 @@ fn create_series(state: State<'_, AppState>, mut series: Series) -> AppResult<Se
         ],
     )?;
     drop(conn);
-    let conn2 = state.db.read();
+    let conn2 = state.db.lock();
     conn2.query_row(
         "SELECT id, title, aliases, overview, poster_path, bg_path, first_air_date, status,
                 tmdb_id, tvdb_id, tags, favorite, created_at, updated_at
@@ -901,7 +901,7 @@ fn create_series(state: State<'_, AppState>, mut series: Series) -> AppResult<Se
 
 #[tauri::command]
 fn update_series(state: State<'_, AppState>, series: Series) -> AppResult<Series> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute(
         "UPDATE series SET title = ?, aliases = ?, overview = ?, poster_path = ?, bg_path = ?,
          first_air_date = ?, status = ?, tmdb_id = ?, tvdb_id = ?, tags = ?, favorite = ?,
@@ -913,7 +913,7 @@ fn update_series(state: State<'_, AppState>, series: Series) -> AppResult<Series
         ],
     )?;
     drop(conn);
-    let conn2 = state.db.read();
+    let conn2 = state.db.lock();
     conn2.query_row(
         "SELECT id, title, aliases, overview, poster_path, bg_path, first_air_date, status,
                 tmdb_id, tvdb_id, tags, favorite, created_at, updated_at
@@ -933,14 +933,14 @@ fn update_series(state: State<'_, AppState>, series: Series) -> AppResult<Series
 
 #[tauri::command]
 fn delete_series(state: State<'_, AppState>, id: String) -> AppResult<()> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute("DELETE FROM series WHERE id = ?", [&id])?;
     Ok(())
 }
 
 #[tauri::command]
 fn get_seasons(state: State<'_, AppState>, series_id: String) -> AppResult<Vec<Season>> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     let mut stmt = conn.prepare(
         "SELECT id, series_id, season_number, name, overview, poster_path, first_air_date
          FROM seasons WHERE series_id = ? ORDER BY season_number"
@@ -964,7 +964,7 @@ fn create_season(state: State<'_, AppState>, mut season: Season) -> AppResult<Se
     if season.id.is_empty() {
         season.id = Uuid::new_v4().to_string();
     }
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute(
         "INSERT INTO seasons (id, series_id, season_number, name, overview, poster_path, first_air_date)
          VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -978,14 +978,14 @@ fn create_season(state: State<'_, AppState>, mut season: Season) -> AppResult<Se
 
 #[tauri::command]
 fn delete_season(state: State<'_, AppState>, id: String) -> AppResult<()> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute("DELETE FROM seasons WHERE id = ?", [&id])?;
     Ok(())
 }
 
 #[tauri::command]
 fn get_episodes(state: State<'_, AppState>, season_id: String) -> AppResult<Vec<Episode>> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     let mut stmt = conn.prepare(
         "SELECT id, series_id, season_id, episode_number, title, overview, still_path,
                 air_date, runtime_minutes, local_path, watched_ms, last_watched_at, watched
@@ -1016,7 +1016,7 @@ fn create_episode(state: State<'_, AppState>, mut episode: Episode) -> AppResult
     if episode.id.is_empty() {
         episode.id = Uuid::new_v4().to_string();
     }
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute(
         "INSERT INTO episodes (id, series_id, season_id, episode_number, title, overview,
          still_path, air_date, runtime_minutes, local_path, watched_ms, last_watched_at, watched)
@@ -1033,7 +1033,7 @@ fn create_episode(state: State<'_, AppState>, mut episode: Episode) -> AppResult
 
 #[tauri::command]
 fn update_episode(state: State<'_, AppState>, episode: Episode) -> AppResult<Episode> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute(
         "UPDATE episodes SET episode_number = ?, title = ?, overview = ?, still_path = ?,
          air_date = ?, runtime_minutes = ?, local_path = ?, watched_ms = ?,
@@ -1049,14 +1049,14 @@ fn update_episode(state: State<'_, AppState>, episode: Episode) -> AppResult<Epi
 
 #[tauri::command]
 fn delete_episode(state: State<'_, AppState>, id: String) -> AppResult<()> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute("DELETE FROM episodes WHERE id = ?", &[&id])?;
     Ok(())
 }
 
 #[tauri::command]
 fn update_watch_progress(state: State<'_, AppState>, episode_id: String, watched_ms: i64) -> AppResult<()> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute(
         "UPDATE episodes SET watched_ms = ?, last_watched_at = datetime('now') WHERE id = ?",
         params![watched_ms, episode_id],
@@ -1066,7 +1066,7 @@ fn update_watch_progress(state: State<'_, AppState>, episode_id: String, watched
 
 #[tauri::command]
 fn mark_episode_watched(state: State<'_, AppState>, episode_id: String, watched: bool) -> AppResult<()> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute(
         "UPDATE episodes SET watched = ? WHERE id = ?",
         params![watched as i32, episode_id],
@@ -1115,6 +1115,7 @@ async fn search_steam_cdn(query: &str) -> AppResult<Vec<CoverSearchResult>> {
     #[derive(Deserialize)]
     struct SteamSearchItem {
         id: u64,
+        #[allow(dead_code)]
         name: String,
     }
 
@@ -1167,7 +1168,7 @@ async fn download_cover(state: State<'_, AppState>, url: String, game_id: String
 
 #[tauri::command]
 fn get_stats(state: State<'_, AppState>) -> AppResult<Stats> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
 
     let total_game_seconds: i64 = conn
         .query_row("SELECT COALESCE(SUM(total_seconds), 0) FROM games", [], |r| r.get(0))
@@ -1243,7 +1244,7 @@ fn get_stats(state: State<'_, AppState>) -> AppResult<Stats> {
 
 #[tauri::command]
 fn get_setting(state: State<'_, AppState>, key: String) -> AppResult<Option<String>> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     let result = conn.query_row(
         "SELECT value FROM settings WHERE key = ?",
         [&key],
@@ -1258,7 +1259,7 @@ fn get_setting(state: State<'_, AppState>, key: String) -> AppResult<Option<Stri
 
 #[tauri::command]
 fn set_setting(state: State<'_, AppState>, key: String, value: String) -> AppResult<()> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
     conn.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
         params![key, value],
@@ -1281,7 +1282,7 @@ struct ExportData {
 
 #[tauri::command]
 fn export_data(state: State<'_, AppState>) -> AppResult<String> {
-    let conn = state.db.read();
+    let conn = state.db.lock();
 
     // 读取所有数据
     let mut games_stmt = conn.prepare(
@@ -1367,7 +1368,7 @@ fn export_data(state: State<'_, AppState>) -> AppResult<String> {
 fn import_data(state: State<'_, AppState>, json_data: String) -> AppResult<()> {
     let data: ExportData = serde_json::from_str(&json_data)?;
 
-    let conn = state.db.read();
+    let conn = state.db.lock();
 
     for game in data.games {
         conn.execute(
@@ -1472,14 +1473,13 @@ pub fn run() {
     let db = init_database(&db_path).expect("Failed to initialize database");
 
     let app_state = AppState {
-        db: Arc::new(RwLock::new(db)),
+        db: Arc::new(Mutex::new(db)),
         running_games: Arc::new(RwLock::new(HashMap::new())),
         data_dir: data_dir.clone(),
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -1489,26 +1489,37 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_os::init())
         .manage(app_state)
-        .setup(|app| {
-            // 多实例守护：在同一目录下二次启动时聚焦主窗口
-            let data_dir_clone = data_dir.clone();
-            let lock_path = data_dir_clone.join(".lock");
-            if let Ok(lock_file) = fs::File::create(&lock_path) {
-                use std::os::windows::io::AsRawHandle;
-                let handle = lock_file.as_raw_handle();
-                // 尝试独占锁（失败说明已有实例）
-                if unsafe { windows_sys::Win32::Storage::FileSystem::LockFileEx(
+        .setup(move |app| {
+            // 多实例守护：持有锁文件直到进程退出
+            use std::os::windows::io::AsRawHandle;
+            let lock_path = data_dir.join(".lock");
+            let lock_file = match fs::File::create(&lock_path) {
+                Ok(f) => f,
+                Err(_) => {
+                    log::warn!("无法创建锁文件，跳过多实例检查");
+                    log::info!("ZEX started successfully");
+                    return Ok(());
+                }
+            };
+            let handle = lock_file.as_raw_handle();
+            let locked = unsafe {
+                windows_sys::Win32::Storage::FileSystem::LockFileEx(
                     handle as _,
                     windows_sys::Win32::Storage::FileSystem::LOCKFILE_EXCLUSIVE_LOCK,
-                    0, 0, 0,
-                    std::ptr::null(),
-                ) } == 0 {
-                    // 已有实例在运行，尝试聚焦
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.set_focus();
-                    }
+                    0, 0, !0u32,
+                    std::ptr::null_mut(),
+                )
+            };
+            if locked == 0 {
+                // 已有实例在运行，尝试聚焦并退出
+                drop(lock_file);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_focus();
                 }
+                std::process::exit(0);
             }
+            // 泄漏句柄让锁保持到进程退出
+            Box::leak(Box::new(lock_file));
             log::info!("ZEX started successfully");
             Ok(())
         })

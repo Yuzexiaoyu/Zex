@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface-1: #1a1a2e;
+  --color-surface-2: #16213e;
+  --color-surface-3: #0f3460;
+  --color-accent: #e94560;
+  --color-accent-hover: #ff6b6b;
+  --color-text-primary: #eaeaea;
+  --color-text-secondary: #a0a0a0;
+  --color-border: #2a2a4a;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+}
+
+/* Light mode overrides */
+.light {
+  --color-surface-1: #f5f5f7;
+  --color-surface-2: #e8e8ed;
+  --color-surface-3: #d1d1d6;
+  --color-accent: #e94560;
+  --color-text-primary: #1a1a2e;
+  --color-text-secondary: #6b6b7b;
+  --color-border: #d1d1d6;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--color-surface-1);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* ─── Scrollbar ─────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-accent); }
+
+/* ─── Focus ─────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ─── Animations ─────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-fade-in { animation: fadeIn 0.2s ease-out; }
+.animate-slide-in { animation: slideIn 0.2s ease-out; }
+
+/* ─── 10-Foot Mode (TV/Remote) ───────────── */
+.ten-foot {
+  font-size: 1.5rem;
+}
+.ten-foot .nav-item {
+  padding: 1rem 1.5rem;
+  font-size: 1.4rem;
+}
+.ten-foot .card {
+  min-width: 280px;
+  min-height: 360px;
+}
+
+/* ─── Game Cover ─────────────────────────── */
+.game-cover {
+  aspect-ratio: 3/4;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--color-surface-2);
+}
+
+/* ─── Progress Bar ───────────────────────── */
+.progress-bar {
+  height: 4px;
+  background: var(--color-surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+/* ─── Badge ──────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--color-surface-3);
+  color: var(--color-text-secondary);
+}
+.badge-accent {
+  background: var(--color-accent);
+  color: white;
+}

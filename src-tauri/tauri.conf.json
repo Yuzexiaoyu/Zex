@@ -4,7 +4,6 @@
   "version": "0.1.0",
   "identifier": "com.zex.app",
   "build": {
-    "devtools": true,
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
@@ -48,9 +47,6 @@
     }
   },
   "plugins": {
-    "sql": {
-      "preload": ["sqlite:data/zex.db"]
-    },
     "updater": {
       "pubkey": "",
       "endpoints": []

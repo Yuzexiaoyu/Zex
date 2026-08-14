@@ -5,6 +5,7 @@ export const MIN_GAME_COLUMNS = 3;
 export const MAX_GAME_COLUMNS = 12;
 import type { Game, GameFilter, Playlist, Series, SeriesCard, Stats, ThemeMode, Track } from '../types';
 import * as api from '../api';
+import { parseLrc, type LrcLine } from '../utils/lyrics';
 
 // 音乐播放条的当前状态（展示数据冗余，避免每次都要回查 tracks）
 export interface MusicNowPlayingState {
@@ -19,6 +20,16 @@ export interface MusicNowPlayingState {
 
 // 音量持久化防抖：拖动时 commit 节流调用，这里只写最终值（避免高频写 SQLite）
 let musicVolPersistTimer: number | null = null;
+
+// 当前曲的带时间轴内嵌歌词行；无播放 / 无词 / 请求失败 → null（自动开词与词按钮共用校验）
+async function currentTimedLyrics(): Promise<LrcLine[] | null> {
+  const np = useAppStore.getState().nowPlaying;
+  if (!np) return null;
+  const raw = await api.getTrackLyrics(np.trackId).catch(() => null);
+  if (!raw) return null;
+  const lines = parseLrc(raw);
+  return lines.length > 0 ? lines : null;
+}
 
 interface AppState {
   // ─── Data ───────────────────────────────
@@ -37,6 +48,8 @@ interface AppState {
   musicVolume: number;
   musicSeekTarget: number | null; // 最近一次 seek 的目标 ms；progress 位置接近它之前，position 不被覆盖
   musicSeekLockUntil: number;     // seek 态绝对超时（ms 时间戳）：超时强制采纳 progress 位置（seek 异常兜底）
+  lyricsOpen: boolean;            // 桌面歌词窗是否开着（权威来源 = 后端广播的 lyrics-visibility-changed）
+  lyricsDismissed: boolean;       // 本次播放会话内已手动关过词，抑制自动弹出（内存态，重启清零）
 
   // ─── UI State ───────────────────────────
   activeView: 'games' | 'series' | 'music' | 'stats' | 'settings';
@@ -115,6 +128,13 @@ interface AppState {
   cycleMusicLoop: () => Promise<void>;
   stopMusic: () => Promise<void>;
   clearMusicPlaying: () => void;
+  setLyricsOpen: (v: boolean) => void;
+  // 播放开始时静默尝试自动开词（设置开 + 未手动关过 + 当前曲有带时间轴歌词）
+  autoShowLyrics: () => Promise<void>;
+  // 歌词窗手动关闭信号（X 按钮）→ 本次会话内不再自动弹出
+  dismissLyricsAutoShow: () => void;
+  // 桌面歌词开关：返回 false = 当前曲无内嵌同步歌词、未开窗（播放条据此弹提示）
+  toggleDesktopLyrics: () => Promise<boolean>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -134,6 +154,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   musicVolume: 70,
   musicSeekTarget: null,
   musicSeekLockUntil: 0,
+  lyricsOpen: false,
+  lyricsDismissed: false,
 
   // ─── Initial UI State ───────────────────
   activeView: 'games',
@@ -477,6 +499,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       musicSeekTarget: null,
       musicSeekLockUntil: 0,
     });
+    // 播放开始 → 按「播放音乐时默认显示歌词」开关尝试自动开词（静默，不打断播放）
+    void get().autoShowLyrics();
   },
 
   updateMusicProgress: (p) => {
@@ -532,6 +556,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       musicSeekTarget: null,
       musicSeekLockUntil: 0,
     } : s));
+    // 换曲（含队列自动下一首）→ 同样尝试自动开词：无词曲自动隐藏后，下首有词能恢复弹出
+    void get().autoShowLyrics();
   },
 
   // ZEX 重启/刷新后恢复播放条。playing 用后端快照的真实值（后端 MusicSnapshot
@@ -625,12 +651,49 @@ export const useAppStore = create<AppState>((set, get) => ({
     await api.musicControl('loop', next);
   },
 
-  // 停止：本地立即清（反馈即时），mpv 退出后后端 emit mpv-closed 再清一遍（幂等）
+  // 停止：本地立即清（反馈即时），mpv 退出后后端 emit mpv-closed 再清一遍（幂等）。
+  // 歌词窗靠 mpv-closed 自关，lyricsOpen 靠 lyrics-visibility-changed 复位，这里只是先乐观清一下
   stopMusic: async () => {
-    set({ nowPlaying: null, musicQueue: [], musicSeekTarget: null, musicSeekLockUntil: 0 });
+    // lyricsDismissed 同步清：会话结束 = 下一次播放恢复自动显示（不等异步的 mpv-closed）
+    set({ nowPlaying: null, musicQueue: [], musicSeekTarget: null, musicSeekLockUntil: 0, lyricsOpen: false, lyricsDismissed: false });
     await api.mpvQuit();
   },
 
   // 影视接管 / mpv 退出时清音乐播放条（mpv-ready 表示音乐已让位）
-  clearMusicPlaying: () => set({ nowPlaying: null, musicQueue: [], musicSeekTarget: null, musicSeekLockUntil: 0 }),
+  clearMusicPlaying: () => set({ nowPlaying: null, musicQueue: [], musicSeekTarget: null, musicSeekLockUntil: 0, lyricsOpen: false, lyricsDismissed: false }),
+
+  setLyricsOpen: (v) => set({ lyricsOpen: v }),
+
+  // 桌面歌词开关：开窗前先验证当前曲有「带时间轴」的内嵌歌词，没有就不开（用户选定的行为），
+  // 返回 false 让播放条弹「该曲无内嵌同步歌词」提示
+  toggleDesktopLyrics: async () => {
+    if (get().lyricsOpen) {
+      // 用户点词按钮关窗 → 手动关闭，本会话内不再自动弹出
+      set({ lyricsDismissed: true });
+      await api.setDesktopLyricsVisible(false).catch(() => {});
+      return true;
+    }
+    const lines = await currentTimedLyrics();
+    if (!lines) return false;
+    await api.setDesktopLyricsVisible(true).catch(() => {});
+    return true;
+  },
+
+  // 播放开始时静默尝试自动开词（设置开 + 未手动关过 + 有带时间轴歌词）。
+  // 保留 lyricsOpen 早退：已开窗时换曲由歌词窗自身 loadTrack 接管，
+  // 且重复 show(true) 会把拖动后的窗口位置弹回记忆值（后端每次 true 重放位置）
+  autoShowLyrics: async () => {
+    try {
+      if (get().lyricsDismissed) return;
+      if (get().lyricsOpen) return;
+      const setting = await api.getSetting('lyrics_auto_show').catch(() => null);
+      if (setting !== '1') return;               // 默认关：未存过 = null ≠ '1'
+      const lines = await currentTimedLyrics();  // 内部已含 nowPlaying 空判
+      if (!lines) return;                        // 无词静默跳过：不弹提示、不开窗
+      await api.setDesktopLyricsVisible(true).catch(() => {});
+    } catch { /* 全部静默：失败只影响本次自动显示，不打断播放 */ }
+  },
+
+  // 歌词窗 X 被用户点掉 → 本次播放会话内不再自动弹出（dismissed 为内存态，停止/重启恢复）
+  dismissLyricsAutoShow: () => set({ lyricsDismissed: true }),
 }));

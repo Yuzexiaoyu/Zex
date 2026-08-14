@@ -268,6 +268,14 @@ export default function App() {
         listen<string>('music-track-changed', (e) => {
           useAppStore.getState().updateMusicTrack(e.payload);
         }),
+        // 桌面歌词显隐（开窗/关窗/停止联动都来自后端广播）：同步播放条「词」按钮态
+        listen<boolean>('lyrics-visibility-changed', (e) => {
+          useAppStore.getState().setLyricsOpen(e.payload);
+        }),
+        // 歌词窗 X 被用户点掉 → 本次播放会话内不再自动弹出（dismissed 为内存态）
+        listen<void>('lyrics-manual-dismiss', () => {
+          useAppStore.getState().dismissLyricsAutoShow();
+        }),
       ]);
       if (cancelled) subs.forEach((s) => s()); else stops = subs;
     })();

@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-lyrics",
+  "description": "桌面歌词窗口（透明置顶条：事件监听 + 拖拽区域移动窗口 + 量解锁钮热区坐标）",
+  "windows": ["desktop-lyrics"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-outer-position",
+    "core:window:allow-scale-factor"
+  ]
+}

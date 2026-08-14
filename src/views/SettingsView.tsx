@@ -36,6 +36,8 @@ export default function SettingsView() {
   const [hwdec, setHwdec] = useState(true);
   const [hdr, setHdr] = useState(true);
   const [mpvOk, setMpvOk] = useState(true);
+  // 播放音乐时默认显示歌词（默认关，只有显式存过 "1" 才开）
+  const [lyricsAutoShow, setLyricsAutoShow] = useState(false);
   const [fetchingCovers, setFetchingCovers] = useState(false);
   const [fetchProgress, setFetchProgress] = useState<{ done: number; total: number; ok: number; fail: number } | null>(null);
   const [fetchResult, setFetchResult] = useState<string | null>(null); // 完成结果（内联显示，不弹窗）
@@ -92,6 +94,8 @@ export default function SettingsView() {
     api.isAutostartEnabled().then(setAutostartState).catch(() => {});
     api.getSetting('autostart_show_window').then((v) => setAutostartShow(v === '1')).catch(() => {});
     api.mpvAvailable().then(setMpvOk).catch(() => {});
+    // 播放音乐时默认显示歌词：默认关，只有显式存过 "1" 才开
+    api.getSetting('lyrics_auto_show').then((v) => setLyricsAutoShow(v === '1')).catch(() => {});
   }, []);
 
   // 手柄开关即时保存（写库 + 同步给 Gamepad 服务）
@@ -174,6 +178,11 @@ export default function SettingsView() {
 
   const focusedRow = useFocusIndex('settings:rows');
 
+  // 自启方式行（编号 3）仅在开机自启开启时渲染 → 自启关闭时其后的所有行在
+  // rows 数组中的索引会少 1。JSX 的 data-settings-row 编号据此偏移，保证
+  // 数组索引 ↔ DOM 编号在两种状态下都一一对应（否则手柄焦点整体错位一格）
+  const rowOffset = autostart ? 0 : -1;
+
   // 隐藏库：三个主库最多 2 个；统计页不占名额，可独立隐藏
   const tryHide = (id: 'games' | 'series' | 'music' | 'stats') => {
     if (id !== 'stats' && !hiddenLibraries.includes(id) && hiddenLibraries.filter((x) => x !== 'stats').length >= 2) {
@@ -195,7 +204,8 @@ export default function SettingsView() {
     onLeftRight?: (dir: 'left' | 'right') => void;
     onA?: () => void;
   }
-  // 顺序与 JSX 的 data-settings-row 编号一致；chips 的 set/onA 用箭头延迟调用，避免 TDZ
+  // 顺序与 JSX 的 data-settings-row 编号一致（自启方式条件行后的编号用 rowOffset 对齐）；
+  // chips 的 set/onA 用箭头延迟调用，避免 TDZ
   const rows: SettingRow[] = [
     { chips: themeRows.map((t) => ({ active: () => theme === t.value, set: () => setTheme(t.value) })) },
     { onLeftRight: (dir) => setGameColumns(gameColumns + (dir === 'right' ? 1 : -1)) },
@@ -244,6 +254,13 @@ export default function SettingsView() {
             ],
           },
         ]),
+    // 播放音乐时默认显示歌词（与影视引擎无关，恒渲染在播放区末尾）
+    {
+      chips: [
+        { active: () => !lyricsAutoShow, set: () => switchLyricsAutoShow(false) },
+        { active: () => lyricsAutoShow, set: () => switchLyricsAutoShow(true) },
+      ],
+    },
     {
       chips: [
         { active: () => !gamepadEnabled, set: () => switchGamepad(false) },
@@ -382,6 +399,12 @@ export default function SettingsView() {
   const switchHdr = (v: boolean) => {
     setHdr(v);
     savePlayerSetting('mpv_hdr', v ? '1' : '0');
+  };
+
+  // 播放音乐时默认显示歌词：即时保存（与 hwdec/hdr 同款）
+  const switchLyricsAutoShow = (v: boolean) => {
+    setLyricsAutoShow(v);
+    savePlayerSetting('lyrics_auto_show', v ? '1' : '0');
   };
 
   const switchFullscreen = (v: boolean) => {
@@ -579,7 +602,7 @@ export default function SettingsView() {
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">播放</h2>
         <div className="glass-card overflow-hidden">
-          <div className={clsx('px-5 pt-4 pb-3', focusedRow === 4 && 'settings-row-focus')} data-settings-row={4}>
+          <div className={clsx('px-5 pt-4 pb-3', focusedRow === 4 + rowOffset && 'settings-row-focus')} data-settings-row={4 + rowOffset}>
             <div className="flex items-center gap-2.5 mb-2">
               <MonitorPlay size={15} className="text-[#00d4ff]" />
               <p className="text-sm font-medium">播放引擎</p>
@@ -608,7 +631,7 @@ export default function SettingsView() {
 
           {engine === 'mpv' ? (
             <>
-              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 5 && 'settings-row-focus')} data-settings-row={5}>
+              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 5 + rowOffset && 'settings-row-focus')} data-settings-row={5 + rowOffset}>
                 <div className="pr-4">
                   <p className="text-sm font-medium mb-0.5 flex items-center gap-2">
                     <Cpu size={14} className="text-text-tertiary" />
@@ -624,7 +647,7 @@ export default function SettingsView() {
                 </div>
               </div>
 
-              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 6 && 'settings-row-focus')} data-settings-row={6}>
+              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 6 + rowOffset && 'settings-row-focus')} data-settings-row={6 + rowOffset}>
                 <div className="pr-4">
                   <p className="text-sm font-medium mb-0.5">HDR / 杜比视界直通</p>
                   <p className="text-xs text-text-secondary leading-relaxed">
@@ -641,7 +664,7 @@ export default function SettingsView() {
             </>
           ) : (
             <>
-              <div className={clsx('px-6 py-5 border-t border-border-glass', focusedRow === 5 && 'settings-row-focus')} data-settings-row={5}>
+              <div className={clsx('px-6 py-5 border-t border-border-glass', focusedRow === 5 + rowOffset && 'settings-row-focus')} data-settings-row={5 + rowOffset}>
                 <p className="text-sm font-medium mb-0.5">播放器路径</p>
                 <p className="text-xs text-text-secondary mb-2 leading-snug">
                   留空则交给系统默认关联程序打开。注意：走外部播放器时 ZEX 拿不到播放进度，
@@ -662,7 +685,7 @@ export default function SettingsView() {
                 </div>
               </div>
 
-              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 6 && 'settings-row-focus')} data-settings-row={6}>
+              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 6 + rowOffset && 'settings-row-focus')} data-settings-row={6 + rowOffset}>
                 <div className="pr-4">
                   <p className="text-sm font-medium mb-0.5">全屏播放</p>
                   <p className="text-xs text-text-secondary leading-relaxed">
@@ -680,6 +703,21 @@ export default function SettingsView() {
               </div>
             </>
           )}
+
+          {/* 播放音乐时默认显示歌词（恒渲染：音乐播放走内置 mpv，与影视引擎无关） */}
+          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 7 + rowOffset && 'settings-row-focus')} data-settings-row={7 + rowOffset}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5">播放音乐时默认显示歌词</p>
+              <p className="text-xs text-text-secondary leading-relaxed">
+                开启后播放音乐时自动显示桌面歌词；歌曲无内嵌同步歌词时自动跳过，
+                手动关闭后本次播放内不再弹出
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button className={clsx('chip', !lyricsAutoShow && 'active')} onClick={() => switchLyricsAutoShow(false)}>关</button>
+              <button className={clsx('chip', lyricsAutoShow && 'active')} onClick={() => switchLyricsAutoShow(true)}>开</button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -687,7 +725,7 @@ export default function SettingsView() {
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">手柄</h2>
         <div className="glass-card overflow-hidden">
-          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5', focusedRow === 7 && 'settings-row-focus')} data-settings-row={7}>
+          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5', focusedRow === 8 + rowOffset && 'settings-row-focus')} data-settings-row={8 + rowOffset}>
             <div>
               <p className="text-sm font-medium flex items-center gap-2">
                 <Gamepad2 size={14} className="text-text-tertiary" />
@@ -705,7 +743,7 @@ export default function SettingsView() {
           </div>
 
           {/* 西瓜键唤起开关（默认关）：开时写入注册表关掉 Game Bar 抢键 */}
-          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 8 && 'settings-row-focus')} data-settings-row={8}>
+          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 9 + rowOffset && 'settings-row-focus')} data-settings-row={9 + rowOffset}>
             <div className="pr-4">
               <p className="text-sm font-medium mb-0.5 flex items-center gap-2">
                 <Gamepad2 size={14} className="text-text-tertiary" />
@@ -724,7 +762,7 @@ export default function SettingsView() {
           </div>
 
           {/* PS logo 键唤起开关（默认关）：HID 报文直读，独立开关，不涉及 Game Bar */}
-          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 9 && 'settings-row-focus')} data-settings-row={9}>
+          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 10 + rowOffset && 'settings-row-focus')} data-settings-row={10 + rowOffset}>
             <div className="pr-4">
               <p className="text-sm font-medium mb-0.5 flex items-center gap-2">
                 <Gamepad2 size={14} className="text-text-tertiary" />
@@ -809,7 +847,7 @@ export default function SettingsView() {
 
           {/* Steam CDN 补封面（手动触发，导入保持零网络） */}
           {/* 获取缺失封面：行 + 进度条 + 结果整体作为焦点行，蓝底/竖线随高度实时伸缩 */}
-          <div className={clsx('mt-5 py-3.5 border-t border-border-glass -mx-5 px-5 -mb-5', focusedRow === 10 && 'settings-row-focus')} data-settings-row={10}>
+          <div className={clsx('mt-5 py-3.5 border-t border-border-glass -mx-5 px-5 -mb-5', focusedRow === 11 + rowOffset && 'settings-row-focus')} data-settings-row={11 + rowOffset}>
             <div className="flex items-center justify-between">
               <div className="pr-4">
                 <p className="text-sm font-medium mb-0.5">从 Steam CDN 获取缺失封面</p>
@@ -856,7 +894,7 @@ export default function SettingsView() {
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">数据</h2>
         <div className="glass-card overflow-hidden">
-          <div className={clsx('flex items-center justify-between px-6 py-5 border-b border-border-glass', focusedRow === 11 && 'settings-row-focus')} data-settings-row={11}>
+          <div className={clsx('flex items-center justify-between px-6 py-5 border-b border-border-glass', focusedRow === 12 + rowOffset && 'settings-row-focus')} data-settings-row={12 + rowOffset}>
             <div>
               <p className="text-sm font-medium mb-0.5">导出数据</p>
               <p className="text-xs text-text-secondary">将所有游戏和影视数据导出为 JSON 文件</p>
@@ -870,7 +908,7 @@ export default function SettingsView() {
               {exporting ? '导出中...' : '导出'}
             </button>
           </div>
-          <div className={clsx('flex items-center justify-between px-6 py-5 border-b border-border-glass', focusedRow === 12 && 'settings-row-focus')} data-settings-row={12}>
+          <div className={clsx('flex items-center justify-between px-6 py-5 border-b border-border-glass', focusedRow === 13 + rowOffset && 'settings-row-focus')} data-settings-row={13 + rowOffset}>
             <div>
               <p className="text-sm font-medium mb-0.5">导入数据</p>
               <p className="text-xs text-text-secondary">从 JSON 备份文件恢复数据</p>
@@ -884,7 +922,7 @@ export default function SettingsView() {
               {importing ? '导入中...' : '导入'}
             </button>
           </div>
-          <div className={clsx('flex items-center justify-between px-6 py-5', focusedRow === 13 && 'settings-row-focus')} data-settings-row={13}>
+          <div className={clsx('flex items-center justify-between px-6 py-5', focusedRow === 14 + rowOffset && 'settings-row-focus')} data-settings-row={14 + rowOffset}>
             <div>
               <p className="text-sm font-medium text-danger mb-0.5">清除所有数据</p>
               <p className="text-xs text-text-secondary">删除全部游戏、影视和封面文件（API Key 保留）</p>
@@ -913,8 +951,8 @@ export default function SettingsView() {
           ]).map((lib, i) => (
             <div
               key={lib.id}
-              className={clsx('flex items-center justify-between gap-6 px-6 py-4', i > 0 && 'border-t border-border-glass', focusedRow === 14 + i && 'settings-row-focus')}
-              data-settings-row={14 + i}
+              className={clsx('flex items-center justify-between gap-6 px-6 py-4', i > 0 && 'border-t border-border-glass', focusedRow === 15 + i + rowOffset && 'settings-row-focus')}
+              data-settings-row={15 + i + rowOffset}
             >
               <p className="text-sm font-medium">{lib.name}</p>
               <div className="flex items-center gap-1.5 shrink-0">

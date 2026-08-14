@@ -258,6 +258,21 @@ export async function mpvQuit(): Promise<void> {
   return invoke('mpv_quit');
 }
 
+// 曲目的内嵌歌词原文（LRC 或纯文本；无内嵌歌词返回 null）
+export async function getTrackLyrics(trackId: string): Promise<string | null> {
+  return invoke('get_track_lyrics', { trackId });
+}
+
+// 桌面歌词窗显隐（后端广播 lyrics-visibility-changed 同步所有窗口的按钮态）
+export async function setDesktopLyricsVisible(visible: boolean): Promise<void> {
+  return invoke('set_desktop_lyrics_visible', { visible });
+}
+
+// 桌面歌词锁定（true=鼠标穿透；解锁走托盘菜单）
+export async function setDesktopLyricsLocked(locked: boolean): Promise<void> {
+  return invoke('set_desktop_lyrics_locked', { locked });
+}
+
 // 收进系统托盘：隐藏窗口并亮出托盘图标（窗口开着时托盘不显示图标）
 export async function hideWindowToTray(): Promise<void> {
   return invoke('hide_window_to_tray');

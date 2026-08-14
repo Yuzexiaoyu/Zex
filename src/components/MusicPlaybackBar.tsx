@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Music2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX, X } from 'lucide-react';
+import { MicVocal, Music2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAppStore } from '../store';
 import { coverSrc } from '../utils/media';
@@ -28,6 +28,23 @@ export default function MusicPlaybackBar() {
   const toggleMusicShuffle = useAppStore((s) => s.toggleMusicShuffle);
   const cycleMusicLoop = useAppStore((s) => s.cycleMusicLoop);
   const stopMusic = useAppStore((s) => s.stopMusic);
+  const lyricsOpen = useAppStore((s) => s.lyricsOpen);
+  const toggleDesktopLyrics = useAppStore((s) => s.toggleDesktopLyrics);
+
+  // 「该曲无内嵌同步歌词」提示气泡：点词按钮但开不了窗时亮 2.2s
+  const [lyricsHint, setLyricsHint] = useState(false);
+  const lyricsHintTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (lyricsHintTimer.current != null) window.clearTimeout(lyricsHintTimer.current);
+  }, []);
+  const onLyricsClick = async () => {
+    const ok = await toggleDesktopLyrics();
+    if (!ok) {
+      setLyricsHint(true);
+      if (lyricsHintTimer.current != null) window.clearTimeout(lyricsHintTimer.current);
+      lyricsHintTimer.current = window.setTimeout(() => setLyricsHint(false), 2200);
+    }
+  };
 
   // 进度条拖动：拖动中本地显示 seekPos，松手才发一次 seek（避免高频 set time-pos 积压）
   const [isSeeking, setIsSeeking] = useState(false);
@@ -162,6 +179,21 @@ export default function MusicPlaybackBar() {
           >
             {musicLoop === 2 ? <Repeat1 size={15} /> : <Repeat size={15} />}
           </button>
+          {/* 桌面歌词：当前曲无内嵌同步歌词时不开窗，弹提示气泡 */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => void onLyricsClick()}
+              className={lyricsOpen ? iconBtnActive : iconBtn}
+              title="桌面歌词"
+            >
+              <MicVocal size={15} />
+            </button>
+            {lyricsHint && (
+              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap glass-card px-2.5 py-1.5 text-[11px] text-text-secondary shadow-xl animate-fade-in z-20">
+                该曲无内嵌同步歌词
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 进度 */}

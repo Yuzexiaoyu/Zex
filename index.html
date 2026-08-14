@@ -11,11 +11,12 @@
       // 所以 setTheme 会额外往 localStorage 写一份镜像，这里只认这份。
       // <html> 上预置 class="dark"（默认深色），只在镜像明确说是浅色时才摘掉。
       //
-      // 托盘菜单是同一个 index.html 带 ?view=tray-menu 打开的独立小窗，
-      // 它要求 html/body 全透明才能露出自绘菜单的圆角，绝不能刷底色。
+      // 托盘菜单 / 桌面歌词是同一个 index.html 带 ?view=xxx 打开的独立小窗，
+      // 它们要求 html/body 全透明（圆角/文字阴影直接透桌面），绝不能刷底色。
       (function () {
         try {
-          if (new URLSearchParams(location.search).get('view') === 'tray-menu') return;
+          var v = new URLSearchParams(location.search).get('view');
+          if (v === 'tray-menu' || v === 'desktop-lyrics') return;
           var t = localStorage.getItem('zex-theme');
           var dark = t !== 'light' &&
             !(t === 'system' && !matchMedia('(prefers-color-scheme: dark)').matches);

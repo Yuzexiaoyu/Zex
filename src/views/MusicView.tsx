@@ -469,6 +469,9 @@ export default function MusicView() {
               <div
                 className={clsx(
                   'music-row group flex items-center gap-3 px-4 h-full rounded-xl border border-transparent transition-all',
+                  // 亮起瞬变：快速划过时每行都会瞬间亮起，不因 150ms 过渡来不及显示而"没亮"；
+                  // 熄灭（解除 hover）时 transition 恢复 → 保留 150ms 淡出
+                  'hover:transition-none',
                   'hover:bg-bg-surface-hover hover:border-border-glass cursor-pointer',
                   // 只在挂载后的入场窗口内加动画，之后滚动挂载的行不带动画
                   !everDragged && introWindow && 'music-row-enter',

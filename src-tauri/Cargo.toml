@@ -14,6 +14,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
+# 单实例保护：开机自启 + 手动双击双开时，第二个实例唤醒已有实例后退出。
+# 必须 Builder 链第一个注册（插件生效要求）；无 JS API，不需要 capabilities
+tauri-plugin-single-instance = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
 tauri-plugin-shell = "2"
@@ -28,6 +31,7 @@ serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
+regex = "1"
 sysinfo = "0.32"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -40,4 +44,20 @@ parking_lot = "0.12"
 image = "0.25"
 v_htmlescape = "0.1"
 urlencoding = "2"
-windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Foundation"] }
+percent-encoding = "2"
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Devices_HumanInterfaceDevice"] }
+# Xbox 手柄输入（Windows 走 XInput，最可靠）：后端线程常驻轮询，不受 WebView 窗口隐藏影响。
+# 默认 feature 是 wgi（Windows.Gaming.Input / WinRT），在 Tauri 环境下初始化不可靠，
+# 显式改用 xinput
+gilrs = { version = "0.11", default-features = false, features = ["xinput"] }
+# 西瓜键（Guide）读取：XInputGetState 的 wButtons 含 Guide 位（0x0400），
+# gilrs 不暴露该位，直接依赖 rusty-xinput 轮询（SDL/mpv 同款读取方式）
+rusty-xinput = "1.3"
+# PS 手柄（DualSense）输入：XInput 不认 PS 手柄（走 HID 协议），用 hidapi 补充通道
+# 直读 USB 有线报文（蓝牙字节布局不同 + 需解锁，明确不做）
+hidapi = "2"
+# 音乐库：音频内嵌标签解析（mp3/flac/m4a/ogg/wav/ape/aiff 等，全格式内置，无需 feature）
+lofty = "0.24"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"

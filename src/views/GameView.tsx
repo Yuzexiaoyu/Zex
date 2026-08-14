@@ -1,178 +1,113 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store';
 import GameGrid from '../components/GameGrid';
 import GameDetail from './GameDetail';
-import AddGameModal from '../components/AddGameModal';
 import SteamScanModal from '../components/SteamScanModal';
-import {
-  Search, Plus, RefreshCw, Filter, SortAsc, SortDesc,
-  LayoutGrid, Columns3, X, Gamepad2
-} from 'lucide-react';
-import { clsx } from 'clsx';
+import DiskManagerModal from '../components/DiskManagerModal';
+import { message } from '@tauri-apps/plugin-dialog';
+import { Plus, Gamepad2, ChevronDown } from 'lucide-react';
+import { useEscIntercept } from '../utils/escIntercept';
 
-export default function GameView() {
-  const {
-    games, filter, setFilter, loadGames,
-    selectedGameId, setSelectedGameId,
-    launchGame, uiMode,
-  } = useAppStore();
+interface Props {
+  onAddGame?: () => void;
+}
 
-  const [showAddModal, setShowAddModal] = useState(false);
+export default function GameView({ onAddGame }: Props) {
+  // 逐字段订阅，避免无关字段（如音乐进度）带着整个游戏库重画
+  const games = useAppStore((s) => s.games);
+  const loadGames = useAppStore((s) => s.loadGames);
+  // 详情弹出窗口（仅右键菜单「查看详情」进入）
+  const selectedGameId = useAppStore((s) => s.selectedGameId);
+  const setSelectedGameId = useAppStore((s) => s.setSelectedGameId);
+  const launchGame = useAppStore((s) => s.launchGame);
+
+  const columns = useAppStore((s) => s.gameColumns); // 每行数量在「设置 → 外观」里调
   const [showSteamModal, setShowSteamModal] = useState(false);
-  const [searchInput, setSearchInput] = useState(filter.search || '');
-  const [columns, setColumns] = useState(5);
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [addMenu, setAddMenu] = useState(false); // 添加游戏下拉（手动 / Steam 导入）
+  const [showDiskManager, setShowDiskManager] = useState(false); // 磁盘管理弹窗（右键菜单进入）
+
+  // 添加下拉开着时由它消费 Esc，App 的全局「Esc=收托盘」让位
+  useEscIntercept(addMenu);
 
   useEffect(() => {
     loadGames();
   }, []);
 
-  // Debounced search
+  // 下拉打开时：点击别处 / Esc 关闭
   useEffect(() => {
-    clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => {
-      setFilter({ search: searchInput || undefined });
-    }, 300);
-    return () => clearTimeout(searchTimer.current);
-  }, [searchInput]);
+    if (!addMenu) return;
+    const close = () => setAddMenu(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [addMenu]);
 
   const handleLaunch = useCallback(async (id: string) => {
-    await launchGame(id);
-  }, [launchGame]);
-
-  const sortBy = filter.sort_by || 'name';
-  const sortOrder = filter.sort_order || 'asc';
-  const toggleSort = (field: typeof sortBy) => {
-    if (sortBy === field) {
-      setFilter({ sort_order: sortOrder === 'asc' ? 'desc' : 'asc' });
-    } else {
-      setFilter({ sort_by: field, sort_order: 'asc' });
+    try {
+      await launchGame(id);
+    } catch (err: any) {
+      await message(`启动失败：${typeof err === 'string' ? err : (err?.message ?? String(err))}`, { title: '错误', kind: 'error' });
     }
-  };
-
-  const isTenFoot = uiMode === 'ten-foot';
+  }, [launchGame]);
 
   return (
     <div className="flex h-full">
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Toolbar */}
-        <div className={clsx(
-          'flex items-center gap-3 px-4 py-3 shrink-0',
-          'bg-[var(--color-surface-1)] border-b border-[var(--color-border)]',
-          isTenFoot && 'py-4 px-6',
-        )}>
-          {/* Search */}
-          <div className="relative flex-1 max-w-md">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]" />
-            <input
-              type="text"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="搜索游戏..."
-              className={clsx(
-                'w-full pl-9 pr-4 py-2 rounded-lg text-sm',
-                'bg-[var(--color-surface-2)] border border-[var(--color-border)]',
-                'text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)]',
-                'focus:outline-none focus:border-[var(--color-accent)]',
-                isTenFoot && 'text-xl py-3 pl-11',
-              )}
-            />
-            {searchInput && (
-              <button
-                onClick={() => setSearchInput('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-
-          {/* Sort buttons */}
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-[var(--color-text-secondary)] hidden sm:block">排序:</span>
-            {(['name', 'created_at', 'play_count'] as const).map((field) => (
-              <button
-                key={field}
-                onClick={() => toggleSort(field)}
-                className={clsx(
-                  'flex items-center gap-1 px-2 py-1.5 rounded text-xs',
-                  sortBy === field
-                    ? 'bg-[var(--color-accent)] text-white'
-                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]',
-                )}
-              >
-                {field === 'name' ? '名称' : field === 'created_at' ? '添加时间' : '游玩次数'}
-                {sortBy === field && (sortOrder === 'asc' ? <SortAsc size={12} /> : <SortDesc size={12} />)}
-              </button>
-            ))}
-          </div>
-
-          {/* Columns */}
-          <div className="flex items-center gap-1">
+        {/* Toolbar（排序与列数已移入右键菜单） */}
+        <div className="shrink-0 px-6 py-4 flex items-center gap-3">
+          {/* 添加游戏下拉：手动添加 / Steam 导入 */}
+          <div className="relative">
             <button
-              onClick={() => setColumns((c) => Math.max(2, c - 1))}
-              className="p-1.5 rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]"
+              onClick={(e) => { e.stopPropagation(); setAddMenu(!addMenu); }}
+              className="btn btn-accent gap-2 text-sm"
             >
-              <LayoutGrid size={16} />
-            </button>
-            <span className="text-xs text-[var(--color-text-secondary)] w-4 text-center">{columns}</span>
-            <button
-              onClick={() => setColumns((c) => Math.min(8, c + 1))}
-              className="p-1.5 rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]"
-            >
-              <Columns3 size={16} />
-            </button>
-          </div>
-
-          {/* Refresh */}
-          <button
-            onClick={() => loadGames()}
-            className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] transition-colors"
-            title="刷新"
-          >
-            <RefreshCw size={isTenFoot ? 22 : 18} />
-          </button>
-
-          {/* Filter */}
-          <button
-            onClick={() => setFilter({ favorite: !filter.favorite })}
-            className={clsx(
-              'p-2 rounded-lg transition-colors',
-              filter.favorite
-                ? 'text-yellow-400 bg-yellow-400/10'
-                : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]',
-            )}
-            title="只看收藏"
-          >
-            <Filter size={isTenFoot ? 22 : 18} />
-          </button>
-
-          {/* Add */}
-          <div className="flex gap-2 ml-auto">
-            <button
-              onClick={() => setShowSteamModal(true)}
-              className={clsx(
-                'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                'border border-[var(--color-border)] text-[var(--color-text-secondary)]',
-                'hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]',
-                isTenFoot && 'px-4 py-3 text-lg',
-              )}
-            >
-              <Gamepad2 size={isTenFoot ? 22 : 16} />
-              扫描 Steam
-            </button>
-            <button
-              onClick={() => setShowAddModal(true)}
-              className={clsx(
-                'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                'bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)]',
-                isTenFoot && 'px-4 py-3 text-lg',
-              )}
-            >
-              <Plus size={isTenFoot ? 22 : 16} />
+              <Plus size={15} />
               添加游戏
+              <ChevronDown size={13} className={addMenu ? 'rotate-180 transition-transform' : 'transition-transform'} />
             </button>
+            {addMenu && (
+              <div className="absolute left-0 top-full mt-3 z-50" onClick={(e) => e.stopPropagation()}>
+                <div className="glass-modal solid-modal w-80 overflow-hidden shadow-2xl animate-scale-in">
+                  <div className="px-4 py-3 border-b border-border-glass bg-[rgba(0,212,255,0.05)]">
+                    <p className="text-sm font-semibold text-text-primary">添加到游戏库</p>
+                    <p className="mt-0.5 text-xs text-text-secondary">选择一种添加方式</p>
+                  </div>
+                  <div className="p-2 space-y-1.5">
+                    <button
+                      onClick={() => { setAddMenu(false); onAddGame?.(); }}
+                      className="group w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-all hover:bg-[rgba(0,212,255,0.10)] border border-transparent hover:border-[rgba(0,212,255,0.20)]"
+                    >
+                      <span className="w-10 h-10 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.22)] flex items-center justify-center shrink-0 group-hover:bg-[rgba(0,212,255,0.18)]">
+                        <Plus size={18} className="text-[#00d4ff]" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-text-primary">手动添加</span>
+                        <span className="block mt-0.5 text-xs text-text-secondary">填写名称、启动程序和启动参数</span>
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => { setAddMenu(false); setShowSteamModal(true); }}
+                      className="group w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-all hover:bg-bg-surface-hover border border-transparent hover:border-border-glass-hover"
+                    >
+                      <span className="w-10 h-10 rounded-xl bg-bg-surface border border-border-glass flex items-center justify-center shrink-0 group-hover:bg-bg-surface-active">
+                        <Gamepad2 size={18} className="text-text-secondary group-hover:text-text-primary" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-text-primary">Steam 导入</span>
+                        <span className="block mt-0.5 text-xs text-text-secondary">扫描本机 Steam 库并批量导入</span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -180,15 +115,16 @@ export default function GameView() {
         <div className="flex-1 min-h-0">
           <GameGrid
             games={games}
-            selectedId={selectedGameId}
-            onSelect={setSelectedGameId}
             onLaunch={handleLaunch}
             columns={columns}
+            onAddGame={onAddGame}
+            onOpenSteam={() => setShowSteamModal(true)}
+            onOpenDiskManager={() => setShowDiskManager(true)}
           />
         </div>
       </div>
 
-      {/* Detail panel */}
+      {/* 详情弹出窗口（右键菜单「查看详情」进入） */}
       {selectedGameId && (
         <GameDetail
           gameId={selectedGameId}
@@ -197,8 +133,17 @@ export default function GameView() {
       )}
 
       {/* Modals */}
-      {showAddModal && <AddGameModal onClose={() => setShowAddModal(false)} />}
-      {showSteamModal && <SteamScanModal onClose={() => setShowSteamModal(false)} />}
+      {showSteamModal && (
+        <SteamScanModal
+          onClose={() => setShowSteamModal(false)}
+          onImported={loadGames}
+        />
+      )}
+
+      {/* 磁盘管理弹窗（游戏封面右键菜单进入） */}
+      {showDiskManager && (
+        <DiskManagerModal onClose={() => setShowDiskManager(false)} />
+      )}
     </div>
   );
 }

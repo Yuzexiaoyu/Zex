@@ -4,35 +4,41 @@
   "version": "0.1.0",
   "identifier": "com.zex.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "ZEX - 游戏与影视库",
         "label": "main",
-        "width": 1280,
-        "height": 800,
+        "width": 1920,
+        "height": 1080,
         "minWidth": 960,
         "minHeight": 600,
         "resizable": true,
-        "fullscreen": false,
-        "decorations": true,
+        "fullscreen": true,
+        "decorations": false,
         "center": true,
-        "visible": true
+        "visible": false,
+        "backgroundColor": "#080810"
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://www.steamgriddb.com https://api.steampowered.com https://store.steampowered.com https://*.tmdb.org https://*.themoviedb.org ipc: tauri: http://tauri.localhost https://github.com"
+      "csp": "default-src 'self'; img-src 'self' data: https: http://covers.localhost; style-src 'self' 'unsafe-inline'; connect-src 'self' https://www.steamgriddb.com https://api.steampowered.com https://store.steampowered.com https://*.tmdb.org https://*.themoviedb.org ipc: tauri: http://tauri.localhost https://github.com"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app"],
+    "targets": [
+      "nsis",
+      "app"
+    ],
+    "resources": [
+      "resources/mpv/*",
+      "resources/skin/**/*"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

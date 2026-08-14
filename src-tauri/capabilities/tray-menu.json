@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tray-menu",
+  "description": "托盘右键菜单窗口（自绘玻璃菜单，只需要基础核心权限）",
+  "windows": ["tray-menu"],
+  "permissions": ["core:default"]
+}

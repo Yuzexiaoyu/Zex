@@ -1,10 +1,31 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" href="/zex-logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>ZEX</title>
+    <script>
+      // 首帧定色 —— 必须同步执行，早于 CSS 文件加载、早于 React 挂载。
+      // 主题存在数据库里，读它是异步的；等结果回来白屏早就闪过去了。
+      // 所以 setTheme 会额外往 localStorage 写一份镜像，这里只认这份。
+      // <html> 上预置 class="dark"（默认深色），只在镜像明确说是浅色时才摘掉。
+      //
+      // 托盘菜单是同一个 index.html 带 ?view=tray-menu 打开的独立小窗，
+      // 它要求 html/body 全透明才能露出自绘菜单的圆角，绝不能刷底色。
+      (function () {
+        try {
+          if (new URLSearchParams(location.search).get('view') === 'tray-menu') return;
+          var t = localStorage.getItem('zex-theme');
+          var dark = t !== 'light' &&
+            !(t === 'system' && !matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.toggle('dark', dark);
+          document.documentElement.style.background = dark ? '#080810' : '#f0f2f5';
+        } catch (e) {
+          /* localStorage 不可用：保持 <html class="dark"> 的默认深色 */
+        }
+      })();
+    </script>
   </head>
 
   <body>

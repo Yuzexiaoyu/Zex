@@ -1,35 +1,41 @@
 @import "tailwindcss";
 
 @theme {
-  --color-surface-1: #1a1a2e;
-  --color-surface-2: #16213e;
-  --color-surface-3: #0f3460;
-  --color-accent: #e94560;
-  --color-accent-hover: #ff6b6b;
-  --color-text-primary: #eaeaea;
-  --color-text-secondary: #a0a0a0;
-  --color-border: #2a2a4a;
-  --color-success: #10b981;
-  --color-warning: #f59e0b;
-  --color-danger: #ef4444;
-}
-
-/* Light mode overrides */
-.light {
-  --color-surface-1: #f5f5f7;
-  --color-surface-2: #e8e8ed;
-  --color-surface-3: #d1d1d6;
-  --color-accent: #e94560;
+  /* ─── Light theme defaults ──────────────── */
+  --color-bg-base: #f0f2f5;
+  --color-bg-surface: rgba(255, 255, 255, 0.85);
+  --color-bg-surface-hover: rgba(0, 0, 0, 0.03);
+  --color-bg-surface-active: rgba(0, 0, 0, 0.06);
+  --color-border-glass: rgba(0, 0, 0, 0.06);
+  --color-border-glass-hover: rgba(0, 0, 0, 0.12);
+  --color-border-accent: rgba(0, 212, 255, 0.6);
+  --color-accent: #00d4ff;
+  --color-accent-dim: rgba(0, 212, 255, 0.15);
   --color-text-primary: #1a1a2e;
-  --color-text-secondary: #6b6b7b;
-  --color-border: #d1d1d6;
+  --color-text-secondary: rgba(0, 0, 0, 0.5);
+  --color-text-tertiary: rgba(0, 0, 0, 0.3);
+  --color-success: #10b981;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* ─── Dark Mode Overrides ──────────────────── */
+.dark {
+  --color-bg-base: #080810;
+  --color-bg-surface: rgba(255, 255, 255, 0.05);
+  --color-bg-surface-hover: rgba(255, 255, 255, 0.08);
+  --color-bg-surface-active: rgba(255, 255, 255, 0.12);
+  --color-border-glass: rgba(255, 255, 255, 0.08);
+  --color-border-glass-hover: rgba(255, 255, 255, 0.16);
+  --color-border-accent: rgba(0, 212, 255, 0.4);
+  --color-text-primary: #ffffff;
+  --color-text-secondary: rgba(255, 255, 255, 0.5);
+  --color-text-tertiary: rgba(255, 255, 255, 0.3);
 }
+
+/* 注意：不要加 `* { padding: 0 }` 这类无层级规则——它会覆盖 @layer utilities 里所有
+   Tailwind padding 工具类（CSS 级联：无层级规则优先于层内规则），padding 会全部失效。
+   Tailwind preflight 已自带 margin/padding 重置 */
 
 html, body, #root {
   height: 100%;
@@ -38,90 +44,2308 @@ html, body, #root {
 }
 
 body {
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: var(--color-surface-1);
+  font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--color-bg-base);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
   user-select: none;
+  transition: background-color 0.3s, color 0.3s;
 }
 
-/* ─── Scrollbar ─────────────────────────── */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* ─── Ambient Background ───────────────────── */
+/* 收进托盘前的空白帧：#root 和所有 portal（modal / 右键菜单）都停止绘制，
+   只剩 body 的底色。窗口 hide() 后 WebView2 冻结在这一帧，托盘唤回时不会闪旧视图。
+   用 visibility 而不是卸载组件，详情页、滚动位置等界面状态能原样留到下次唤回 */
+html.app-blank body > * { visibility: hidden; }
+
+.bg-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 50% at 20% 20%, rgba(0, 100, 180, 0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 60% at 80% 80%, rgba(100, 0, 180, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 40% at 50% 50%, rgba(0, 60, 120, 0.03) 0%, transparent 70%);
+  animation: ambient-drift 20s ease-in-out infinite;
 }
+
+.dark .bg-ambient {
+  background:
+    radial-gradient(ellipse 60% 50% at 20% 20%, rgba(0, 100, 180, 0.12) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 60% at 80% 80%, rgba(100, 0, 180, 0.08) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 40% at 50% 50%, rgba(0, 60, 120, 0.06) 0%, transparent 70%);
+}
+
+@keyframes ambient-drift {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
+}
+
+/* ─── Glass Morphism ───────────────────────── */
+.glass {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-glass);
+  transition: background 0.3s, border-color 0.3s;
+}
+
+.glass-card {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--color-border-glass);
+  border-radius: 16px;
+  transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s, background 0.3s;
+}
+
+.glass-card:hover {
+  border-color: var(--color-border-glass-hover);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.dark .glass-card:hover {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.glass-modal {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--color-border-glass);
+  border-radius: 16px; /* 与 .glass-card 统一圆角 */
+  transition: background 0.3s;
+}
+
+.dark .glass-modal {
+  background: rgba(10, 10, 20, 0.94);
+}
+
+/* 实心弹窗：完全不透明（透明度 0），去掉磨砂背景与模糊 */
+.solid-modal {
+  background: #fff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.dark .solid-modal {
+  background: #0d0f1c;
+}
+
+/* 暗色下所有玻璃卡（右键菜单/编辑表单等）用深色磨砂底，避免 5% 白接近全透明 */
+.dark .glass-card {
+  background: rgba(13, 15, 28, 0.97);
+}
+
+/* ─── Glow Effects ─────────────────────────── */
+.glow-accent {
+  box-shadow: 0 0 20px var(--color-accent-dim), 0 0 40px rgba(0, 212, 255, 0.08);
+}
+
+.text-glow-accent {
+  text-shadow: 0 0 20px var(--color-accent-dim);
+}
+
+/* ─── Scrollbar ────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 2px;
 }
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 ::-webkit-scrollbar-thumb:hover { background: var(--color-accent); }
 
-/* ─── Focus ─────────────────────────────── */
+/* 磁盘管理底部待移动区：横向滚动条加粗可见（全局 4px 太细，深色下几乎看不见） */
+.disk-scroll-x {
+  overflow-x: auto;
+}
+.disk-scroll-x::-webkit-scrollbar {
+  height: 8px;
+}
+.disk-scroll-x::-webkit-scrollbar-track {
+  background: transparent;
+}
+.disk-scroll-x::-webkit-scrollbar-thumb {
+  background: var(--color-border-glass-hover);
+  border-radius: 8px;
+}
+.disk-scroll-x::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
+/* 磁盘管理待移动列表：纵向滚动条加粗可见 */
+.disk-scroll-y {
+  overflow-y: auto;
+}
+.disk-scroll-y::-webkit-scrollbar {
+  width: 8px;
+}
+.disk-scroll-y::-webkit-scrollbar-track {
+  background: transparent;
+}
+.disk-scroll-y::-webkit-scrollbar-thumb {
+  background: var(--color-border-glass-hover);
+  border-radius: 8px;
+}
+.disk-scroll-y::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
+/* ─── Focus ────────────────────────────────── */
+/* 不要在这里设 border-radius：这条规则无层级，会盖掉元素自身来自 Tailwind 工具类的
+   圆角（rounded-full / rounded-xl 都在 @layer utilities 内）—— 圆形按钮一聚焦就变成
+   6px 圆角方块。outline 本身会自动贴合元素的 border-radius，不需要额外指定 */
 :focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
-/* ─── Animations ─────────────────────────── */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
+/* 手柄焦点（应用层虚拟焦点，非 DOM focus）：青色描边辉光，各组件再加自己的聚焦态 */
+.gamepad-focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(0, 212, 255, 0.15), 0 0 24px rgba(0, 212, 255, 0.25);
+}
+
+/* ─── Animations ───────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
   to { opacity: 1; transform: translateY(0); }
 }
-@keyframes slideIn {
-  from { opacity: 0; transform: translateX(-8px); }
-  to { opacity: 1; transform: translateX(0); }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-.animate-fade-in { animation: fadeIn 0.2s ease-out; }
-.animate-slide-in { animation: slideIn 0.2s ease-out; }
-
-/* ─── 10-Foot Mode (TV/Remote) ───────────── */
-.ten-foot {
-  font-size: 1.5rem;
-}
-.ten-foot .nav-item {
-  padding: 1rem 1.5rem;
-  font-size: 1.4rem;
-}
-.ten-foot .card {
-  min-width: 280px;
-  min-height: 360px;
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
 }
 
-/* ─── Game Cover ─────────────────────────── */
-.game-cover {
-  aspect-ratio: 3/4;
-  object-fit: cover;
-  border-radius: 8px;
-  background: var(--color-surface-2);
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-4px); }
 }
 
-/* ─── Progress Bar ───────────────────────── */
-.progress-bar {
-  height: 4px;
-  background: var(--color-surface-3);
-  border-radius: 2px;
-  overflow: hidden;
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(24px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
-.progress-bar-fill {
-  height: 100%;
+
+.animate-fade-up { animation: fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.animate-fade-in { animation: fade-in 0.25s ease-out forwards; }
+.animate-scale-in { animation: scale-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.animate-float { animation: float 3s ease-in-out infinite; }
+
+/* 从托盘恢复时跳过入场动画：窗口 hide 期间 WebView2 不合成新帧，
+   hero-in / fade-up 等动画在 mid-state 时 show() 会导致遮罩错位闪烁 */
+[data-skip-animations] .animate-fade-up,
+[data-skip-animations] .animate-scale-in,
+[data-skip-animations] .hero-bg,
+[data-skip-animations] .hero-content { animation: none !important; }
+
+/* ─── Buttons ──────────────────────────────── */
+/* Tailwind v4 的 preflight 不再给 <button> 兜 cursor: pointer（v3 有），
+   浏览器 UA 默认是 cursor: default（箭头）。.btn / .chip / .nav-pill 这些自定义类
+   各自手写了 pointer，但裸 Tailwind 写的按钮（播放条控件、弹窗关闭叉、窗口最小化/关闭）
+   就全漏了 —— 鼠标移上去不变小手，观感上像是「点不了」。
+   放 @layer base 而不是裸写：层内规则优先级低于工具类，按钮上写 cursor-* 仍能覆盖 */
+@layer base {
+  button:not(:disabled) { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  border: none;
+  white-space: nowrap;
+}
+
+.btn:active { transform: scale(0.96); }
+
+.btn-glass {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  color: var(--color-text-secondary);
+}
+.btn-glass:hover {
+  background: var(--color-bg-surface-hover);
+  border-color: var(--color-border-glass-hover);
+  color: var(--color-text-primary);
+}
+
+.btn-accent {
   background: var(--color-accent);
-  transition: width 0.3s ease;
+  color: #000;
+  font-weight: 600;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.25);
+}
+.btn-accent:hover {
+  background: #33ddff;
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.4);
+  transform: translateY(-1px);
 }
 
-/* ─── Badge ──────────────────────────────── */
+.btn-danger {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+}
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.55);
+  color: #fca5a5;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid transparent;
+}
+.btn-ghost:hover {
+  background: var(--color-bg-surface);
+  border-color: var(--color-border-glass);
+  color: var(--color-text-primary);
+}
+
+/* ─── Nav Pills ────────────────────────────── */
+.nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border-radius: 100px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  border: 1px solid transparent;
+  color: var(--color-text-secondary);
+  background: transparent;
+}
+
+.nav-pill:hover {
+  background: var(--color-bg-surface);
+  border-color: var(--color-border-glass);
+  color: var(--color-text-primary);
+}
+
+.nav-pill.active {
+  background: rgba(0, 212, 255, 0.12);
+  border-color: var(--color-border-accent);
+  color: var(--color-accent);
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.1);
+}
+
+.nav-pill.gamepad-focus {
+  background: rgba(0, 212, 255, 0.18);
+  border-color: var(--color-border-accent);
+  color: var(--color-accent);
+}
+
+/* ─── Badge ────────────────────────────────── */
 .badge {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: 9999px;
-  font-size: 0.75rem;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--color-bg-surface-hover);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-glass);
+}
+
+.badge-accent {
+  background: rgba(0, 212, 255, 0.15);
+  color: var(--color-accent);
+  border-color: var(--color-border-accent);
+}
+
+/* ─── Inputs ───────────────────────────────── */
+.input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  color: var(--color-text-primary);
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.3s;
+  outline: none;
+}
+
+.input::placeholder { color: var(--color-text-tertiary); }
+.input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
+}
+
+/* ─── Game Card Specific ───────────────────── */
+.game-card {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.game-card:hover {
+  border-color: rgba(0, 212, 255, 0.35);
+  transform: translateY(-4px) scale(1.02);
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 212, 255, 0.15),
+    0 0 30px rgba(0, 212, 255, 0.1);
+}
+
+/* 展开状态只保留青色边框（去掉周围光晕的「辉光汇聚」效果） */
+.game-card.expanded {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+/* 展开后 hover：鼠标停在卡片上时去掉青色辉光（原 .game-card:hover 的辉光会与 expanded
+   叠加，点击后卡片周围持续一圈蓝色辉光 =「辉光汇聚」观感）；保留上浮和黑色投影 */
+.game-card.expanded:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--color-accent);
+}
+
+.game-card-cover {
+  aspect-ratio: 2/3;
+  width: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.game-card:hover .game-card-cover {
+  transform: scale(1.06);
+}
+
+/* ─── 拖拽排序 ──────────────────────────── */
+/* 拖拽进行中：禁动画（card-enter 重播）也禁过渡——让位卡片瞬间到位，预览位置即最终位置，松手无反馈；
+   同时 pointer-events: none —— 拖拽中卡片随实时重排移动/重挂载，mouseleave 可能不触发，
+   残留 preview 状态会让松手时多个悬停弹窗同时出现 */
+.drag-active .game-card { animation: none; transition: none !important; pointer-events: none; }
+/* 拖拽结束后（everDragged）永久抑制 card-enter 重播（重排跨行重挂载会闪白），但保留过渡。
+   同时把 hover 的 transform 压回动画保留帧的值（translateY(0) scale(1)）：
+   拖拽前卡片悬停被 card-enter 保留帧压制、不上浮不放大；拖拽后动画被禁用，这里显式压回
+   → 移动前后的悬停效果完全一致（边框/阴影/封面缩放不受影响） */
+.drag-suppress .game-card { animation: none; }
+.drag-suppress .game-card:hover { transform: translateY(0) scale(1); }
+/* 松手落位帧再禁一次过渡兜底：让位卡片新 grid 槽位恰等于当前视觉位置，直接原位落地 */
+.drop-instant .game-card { transition: none !important; }
+.game-card.dragging { opacity: 0; }  /* 拖拽中原卡片完全隐藏（虚影去掉），只留克隆跟随指针 */
+.drag-clone { position: fixed; pointer-events: none; z-index: 1000; }
+.drag-clone .game-card {
+  animation: none;
+  transform: scale(1.04);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6);
+  border-color: rgba(0, 212, 255, 0.5);
+}
+
+.game-card-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 40%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  display: flex;
+  align-items: flex-end;
+  padding: 16px;
+}
+
+.game-card:hover .game-card-overlay {
+  opacity: 1;
+}
+
+/* 手柄焦点卡 = 等效 hover：显示启动按钮 + 高亮。
+   高亮用 inset box-shadow（卡片内侧描边）而非 outline —— 滚动容器 overflow-y-auto
+   无垂直 padding，第一行焦点卡的 outline 会超出可视区顶部被裁剪（上方线条消失）。
+   同理不加 transform：手柄导航靠 scrollToIndex 把焦点行顶到容器最上沿，
+   上浮 4px + 放大 2% 的溢出部分会被裁掉，封面顶部缺一条。
+   鼠标 hover 的上浮也已被 .drag-suppress 压回 0，两种输入这样才一致 */
+.game-card.gamepad-focus {
+  outline: none; /* 覆盖通用 .gamepad-focus 的外侧 outline（会被滚动容器裁剪），只留内侧 inset 线 */
+  box-shadow:
+    inset 0 0 0 5px var(--color-accent),
+    0 24px 48px rgba(0, 0, 0, 0.6);
+  border-color: rgba(0, 212, 255, 0.5);
+}
+
+/* 设置页手柄焦点行：左侧青色发光指示条占满整行 + 青底横向铺满整个选项 */
+.settings-row-focus {
+  position: relative;
+  outline: none;
+  background: linear-gradient(to right, rgba(0, 212, 255, 0.16), rgba(0, 212, 255, 0.04));
+  transition: background 0.25s ease;
+}
+.settings-row-focus::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  background: linear-gradient(to bottom, #7deaff, #00d4ff 45%, #0066ff);
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.8);
+}
+
+.game-card.gamepad-focus .game-card-overlay {
+  opacity: 1;
+}
+
+.game-card.gamepad-focus .game-card-launch {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.game-card-info {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 14px 14px;
+  background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
+}
+
+.game-card-launch {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.game-card:hover .game-card-launch {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ─── 悬停预览卡 ──────────────────────────── */
+.game-preview-card {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none;          /* 纯展示，不挡鼠标 */
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(13, 15, 28, 0.98);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--color-border-glass);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: preview-enter 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 悬停封面：统一高度、宽度按原图比例自适应（不裁剪、不拉伸）。
+   187px = Steam header（460×215）在 400px 宽下的显示高度，所以 Steam 封面观感不变；
+   SteamGridDB 横版（1920×620）同高但更宽，预览卡随之变宽。 */
+.game-preview-banner {
+  height: 187px;
+  width: auto;
+  max-width: 70vw;
+  object-fit: contain;
+  border-radius: 10px;
+  display: block;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* 内容区宽度跟随封面（下限 = PREVIEW_WIDTH，与 GameCard 常量保持一致） */
+.game-preview-content {
+  width: fit-content;
+  min-width: 400px;
+}
+
+.game-preview-placeholder {
+  height: 187px;                 /* 占位块与封面同高，卡片尺寸不跳变 */
+  width: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--color-border-glass);
+  background: linear-gradient(135deg, #1a1a3e 0%, #0d0d2b 100%);
+}
+
+@keyframes preview-enter {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ─── Mini Card (Season / Episode) ─────────── */
+.mini-card {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.mini-card:hover {
+  border-color: rgba(0, 212, 255, 0.35);
+  /* 整体微放大 + 上浮（Netflix 式）；封面不再单独 scale —— 之前 cover scale(1.05)
+     向下溢出会盖住信息区的集名称（悬停查看名称时下半部分被遮挡的根因） */
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3), 0 0 16px rgba(0, 212, 255, 0.08);
+}
+
+.dark .mini-card:hover {
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5), 0 0 16px rgba(0, 212, 255, 0.1);
+}
+
+.mini-card.expanded {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+/* 展开后 hover：与 .game-card.expanded:hover 同理，去掉青色辉光只留边框 + 黑投影 */
+.mini-card.expanded:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--color-accent);
+}
+
+.mini-card-cover {
+  aspect-ratio: 16/9;
+  width: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ─── Series View (Emby 式影视库) ──────────── */
+/* 影视网格卡片悬停名称 overlay：底部深色渐变 + 剧名（非悬停纯封面） */
+.series-card-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.35) 45%, transparent 72%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  display: flex;
+  align-items: flex-end;
+  padding: 14px;
+  pointer-events: none;
+}
+.game-card:hover .series-card-overlay {
+  opacity: 1;
+}
+
+/* 集卡观看进度条（剧照底部细条，Emby 式） */
+.episode-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.25);
+  z-index: 10;
+}
+.episode-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.6);
+}
+
+/* 集卡悬停居中播放按钮：无遮罩（黑罩难看），仅按钮淡入缩放 */
+.episode-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.25s;
+  z-index: 5;
+}
+.mini-card:hover .episode-play {
+  opacity: 1;
+}
+.episode-play-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(0, 212, 255, 0.92);
+  color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(0, 212, 255, 0.45);
+  transform: scale(0.85);
+  transition: transform 0.25s;
+}
+.mini-card:hover .episode-play-btn {
+  transform: scale(1);
+}
+
+/* 已看剧集：封面轻微降饱和（Emby 式），悬停恢复高亮 */
+.mini-card.watched .mini-card-cover {
+  opacity: 0.75;
+  filter: saturate(0.75);
+}
+.mini-card.watched:hover .mini-card-cover {
+  opacity: 1;
+  filter: none;
+}
+
+/* 集卡信息区：悬停背景微亮，暗示可交互 */
+.episode-info {
+  transition: background 0.25s;
+}
+.mini-card:hover .episode-info {
+  background: var(--color-bg-surface-active);
+}
+
+/* ═══ 影视库 2.0：Hero + 海报墙 + 影院式详情页 ═══ */
+
+/* ─── 通用小控件 ───────────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 100px;
+  font-size: 13px;
   font-weight: 500;
-  background: var(--color-surface-3);
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.chip:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-glass-hover);
+}
+.chip.active {
+  background: rgba(0, 212, 255, 0.14);
+  border-color: var(--color-border-accent);
+  color: var(--color-accent);
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.12);
+}
+
+/* 带前置图标的输入框：.input 的 padding 简写写在无层规则里，会盖掉 Tailwind 的 pl-*
+   （Tailwind 工具类在 @layer utilities 内，层内规则优先级低于无层规则）→ 图标会和占位文字重叠。
+   左内边距必须在这里给。 */
+.search-input {
+  padding-left: 38px;
+}
+
+/* 排序下拉触发按钮 */
+.sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border-radius: 100px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sort-trigger:hover {
+  border-color: var(--color-border-glass-hover);
+  color: var(--color-text-primary);
+}
+.sort-trigger.active {
+  border-color: var(--color-border-accent);
+  color: var(--color-accent);
+  background: rgba(0, 212, 255, 0.1);
+}
+
+/* 排序菜单项 */
+/* 内缩胶囊，同 .context-menu-item：整宽直角背景会漏出 .glass-card 的 16px 圆角 */
+.sort-item {
+  width: calc(100% - 12px);
+  margin: 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 8px;
+  border-radius: 9px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-primary);
+  transition: color 0.15s;
+}
+.sort-item:hover { background: var(--color-bg-surface-active); }
+.sort-item > svg:first-child { color: var(--color-text-tertiary); }
+.sort-item.active { color: var(--color-accent); }
+.sort-item.active > svg:first-child { color: var(--color-accent); }
+
+/* 评分徽标（TMDB） */
+.rating-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 100px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #ffc94d;
+  background: rgba(255, 201, 77, 0.14);
+  border: 1px solid rgba(255, 201, 77, 0.3);
+}
+
+/* ─── Hero 横幅 ────────────────────────────── */
+/* 固定高度：悬停不同海报会换掉整块信息，高度随简介长短变化的话下面的海报墙会上下跳。
+   内容底部对齐 → 简介短的剧按钮也停在同一位置 */
+.hero {
+  position: relative;
+  height: 360px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  isolation: isolate;
+  /* hero-bg 图片加载/淡入期间，hero-shade 半透明区域下面必须是实色，
+     否则遮罩会透出下方页面内容，视觉上像是遮罩在"错位" */
+  background: #080810;
+}
+html:not(.dark) .hero {
+  background: #f0f2f5;
+}
+
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 18%;
+  z-index: 0;
+  transform: scale(1.02);
+  /* 常驻自己的合成层：否则 scale 动画期间浏览器会把上面的 hero-shade
+     一起拖进"重叠层"反复光栅化，渐变边缘就会抖 */
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  /* 悬停海报会频繁换图（每次都是新元素、动画重播），时长要短，否则跟不上鼠标 */
+  animation: hero-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* 没有横版背景图时用竖版海报兜底：放大 + 模糊，避免拉伸变形 */
+.hero-bg-poster {
+  filter: blur(26px) saturate(1.15);
+  transform: scale(1.25);
+}
+
+@keyframes hero-in {
+  from { opacity: 0; transform: scale(1.08); }
+  to { opacity: 1; transform: scale(1.02); }
+}
+
+.hero-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  /* 遮罩本身不动，但它压在做 scale 动画的 hero-bg 上。
+     不显式提层的话它会被合成器每帧重新光栅化，渐变的抖动噪声位置跟着变，
+     肉眼看就是"半透明黑边缘在闪"。translateZ 让它只光栅化一次 */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  background:
+    linear-gradient(to right, rgba(8, 8, 16, 0.94) 0%, rgba(8, 8, 16, 0.72) 42%, rgba(8, 8, 16, 0.15) 100%),
+    linear-gradient(to top, var(--color-bg-base) 1%, rgba(8, 8, 16, 0.25) 45%, transparent 100%);
+}
+html:not(.dark) .hero-shade {
+  /* 白色遮罩要够强：hero 背景图（深色剧照 / 深色海报放大模糊）在浅色主题下
+     会从右侧低透明度区透出大片暗色，把整个 hero 区域提白（右侧 0.82），
+     只留左侧一点渐变层次，大名字深色文字在近白底上干净可读 */
+  background:
+    linear-gradient(to right, rgba(255, 255, 255, 0.97) 0%, rgba(255, 255, 255, 0.9) 42%, rgba(255, 255, 255, 0.82) 100%),
+    linear-gradient(to top, var(--color-bg-base) 1%, rgba(255, 255, 255, 0.55) 45%, rgba(255, 255, 255, 0.35) 100%);
+}
+
+.hero-content {
+  position: relative;
+  z-index: 2;
+  padding: 44px 32px 30px;
+  max-width: 780px;
+  max-height: 100%;
+  overflow: hidden;
+  animation: fade-up 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.hero-title {
+  font-size: 44px;
+  line-height: 1.08;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+  /* 超长片名截断成一行：换行会把下面的简介和按钮挤出固定高度 */
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+.dark .hero-title { color: #fff; }
+/* 浅色主题：30px 黑晕在浅底上显眼成暗斑，去掉（深色主题的黑晕在黑底上不可见，保留） */
+html:not(.dark) .hero-title { text-shadow: none; }
+
+.hero-meta {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 13px;
   color: var(--color-text-secondary);
 }
-.badge-accent {
+.hero-meta-item { position: relative; }
+.hero-meta-item + .hero-meta-item::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+  transform: translateY(-50%);
+}
+
+.hero-overview {
+  margin-top: 14px;
+  max-width: 640px;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--color-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ─── 海报墙 ───────────────────────────────── */
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 20px;
+}
+
+/* 悬停特效设计原则：卡片几何完全不动。
+   位移/缩放（无论原点放在哪）都会让绘制盒与布局盒错位，边缘出现亚像素缝隙，
+   在卡片边上表现为一条透明带 —— 这是前两版反复出现该问题的根因。
+   现在只动「光」和「内容层」：亮度、遮罩、内描边、投影、文字淡入淡出，
+   全部是不改变盒模型的属性，物理上不可能挤出空隙。 */
+.poster-card {
+  position: relative;   /* 悬停时提层，投影不会被相邻卡片的实心底盖住 */
+  cursor: pointer;
+  animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.poster-card:hover { z-index: 2; }
+
+.poster-frame {
+  position: relative;
+  height: 100%;          /* 精确填满网格单元：网格行高取整时卡片底部不会残留未填充的空条 */
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0e1018;   /* 实心底：任何子层缝隙只会露出底色，不会漏出页面背景 */
+  border: 1px solid var(--color-border-glass);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+html:not(.dark) .poster-frame { background: #e4e8f0; }
+
+/* 悬停 = 亮起一圈青色内描边 + 抬起感来自投影而非位移 */
+.poster-card:hover .poster-frame {
+  border-color: rgba(0, 212, 255, 0.45);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 212, 255, 0.35),
+    0 18px 38px rgba(0, 0, 0, 0.45),
+    0 0 22px rgba(0, 212, 255, 0.12);
+}
+
+/* 底部渐变：常驻层，永不淡出 → 两个方向都不会出现透明带 */
+.poster-frame::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 45%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.55) 55%, transparent 100%);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* ─── 海报拖拽排序 ─────────────────────────── */
+/* 拖拽中：禁动画与过渡（让位卡片瞬间到位，预览位置即最终位置，松手无回弹），
+   并屏蔽指针事件 —— 卡片随实时重排移动/重挂载，残留 hover 态会导致多张卡同时亮起 */
+.poster-grid.dragging .poster-card {
+  animation: none;
+  transition: none !important;
+  pointer-events: none;
+}
+.poster-grid.dragging .poster-card .poster-frame,
+.poster-grid.dragging .poster-card .poster-img {
+  transition: none !important;
+}
+/* 被拖的原卡整体隐藏，只留跟随指针的克隆 */
+.poster-card.drag-src .poster-frame { opacity: 0; }
+
+/* 拖过一次后永久禁用入场动画：松手撤掉 .dragging 时若动画规则恢复，
+   所有卡片会重播 card-enter（观感是整页刷新了一下） */
+.poster-grid.drag-suppress .poster-card { animation: none; }
+
+/* 跟随指针的克隆（.drag-clone 定位样式与游戏库共用） */
+.drag-clone .poster-frame {
+  transform: scale(1.04);
+  border-color: rgba(0, 212, 255, 0.5);
+  box-shadow: 0 26px 52px rgba(0, 0, 0, 0.6), 0 0 26px rgba(0, 212, 255, 0.18);
+}
+
+/* 各层过渡统一 0.3s / 同一缓动：时长不一致时，悬停途中会出现某层已变完、
+   另一层还在路上的中间态，看起来就是一条忽明忽暗的横带。
+   图片只调亮度、不做缩放 —— 缩放会让图片脱离裁剪框边缘一个亚像素 */
+.poster-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: filter 0.3s ease;
+}
+.poster-card:hover .poster-img {
+  /* 底部滑入条自带渐变承载文字，图片不再大幅压暗：海报上部保持清晰可读 */
+  filter: brightness(0.92) saturate(1.02);
+}
+
+/* 右下角徽标组（已看完等状态；收藏不在卡片上露出，只在右键菜单/详情页操作） */
+.poster-badges {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  z-index: 3;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: opacity 0.25s ease;
+}
+/* 悬停时进度环/徽章让位给底部信息条（信息条内已呈现进度与「已看完」） */
+.poster-card:hover .poster-ring,
+.poster-card:hover .poster-badges { opacity: 0; }
+
+.poster-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #34d399;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(52, 211, 153, 0.32);
+}
+
+/* 右下角观看进度环：未看完的剧显示青色环形 + 中心百分比；已看完由右上绿色徽章替代 */
+.poster-ring {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 3;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  /* 不用 backdrop-filter：每张海报一个实例，会各自建合成层采样背景；
+     底色已近全黑且压在封面图上，模糊看不出来 */
+  background: rgba(0, 0, 0, 0.62);
+  transition: opacity 0.25s ease;
+}
+.poster-ring svg { width: 100%; height: 100%; display: block; transform: rotate(-90deg); }
+.poster-ring-track { fill: none; stroke: rgba(255, 255, 255, 0.2); stroke-width: 3; }
+.poster-ring-fill {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.poster-ring-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.poster-ring-text b { font-size: 9px; font-weight: 700; }
+.poster-ring-text i {
+  font-style: normal;
+  font-size: 6px;
+  font-weight: 600;
+  margin-top: 2px;
+  color: #9ae6ff;
+}
+
+/* 悬停信息条：底部滑入（Netflix 式），元信息为主。
+   图片上部保持清晰，仅底部渐变条承载文字；整条上滑 + 淡入，卡片几何不动 */
+.poster-hover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  opacity: 0;
+  transform: translateY(14px);
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.72) 55%, transparent 100%);
+  transition: opacity 0.25s ease, transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.poster-card:hover .poster-hover {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* 手柄焦点：青色选中框（内侧粗描边 + 底部投影 + 外扩光晕 + 图片微提亮）。
+   不弹 hover 信息条 —— 那条是鼠标悬停的反馈，信息条里的「播放」按钮手柄点不到，
+   聚焦时弹出来反而突兀。选中状态用描边/光效表达，标题、进度环、徽标保持常驻。
+   outline: none + box-shadow: none 覆盖通用 .gamepad-focus 的 outline 与
+   0 0 0 4px spread ring —— poster-card 本身无圆角，那个 ring 会画出方角淡框；
+   真正的青线由下方 .poster-frame 的内侧描边提供（圆角跟随 frame 的 14px） */
+.poster-card.gamepad-focus { z-index: 3; outline: none; box-shadow: none; }
+.poster-card.gamepad-focus .poster-frame {
+  border-color: rgba(0, 212, 255, 0.85);
+  box-shadow:
+    inset 0 0 0 5px var(--color-accent),
+    0 20px 44px rgba(0, 0, 0, 0.5),
+    0 0 28px rgba(0, 212, 255, 0.3);
+}
+.poster-card.gamepad-focus .poster-img {
+  filter: brightness(1.08) saturate(1.04);
+}
+
+.poster-hover-title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #fff;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.poster-hover-meta {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.62);
+}
+/* 已看完：绿色信号，替代进度条 */
+.poster-hover-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #34d399;
+}
+/* 未看完：青色细进度条 + 百分比 */
+.poster-hover-progress {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.poster-hover-progress-track {
+  flex: 1;
+  height: 3px;
+  border-radius: 100px;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+}
+.poster-hover-progress-fill {
+  height: 100%;
+  border-radius: 100px;
   background: var(--color-accent);
-  color: white;
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+}
+.poster-hover-progress-text {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #9ae6ff;
+}
+.poster-hover-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.poster-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 100px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #000;
+  background: var(--color-accent);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 212, 255, 0.4);
+  transition: transform 0.2s, background 0.2s;
+}
+.poster-play:hover { background: #33ddff; transform: scale(1.04); }
+
+.poster-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  /* 纯展示层，必须让点击穿透：它盖在悬停层之上（z3 > z2），
+     即使 opacity 为 0 也照样吃掉事件 —— 播放按钮正好落在这块区域，会点不到 */
+  pointer-events: none;
+  padding: 26px 44px 12px 12px; /* 右侧 44px 让给右下角进度环，标题不与其重叠 */
+  /* 渐变已移至 .poster-frame::after 常驻层，这里只放标题文字 */
+  transition: opacity 0.3s;
+}
+.poster-card:hover .poster-caption { opacity: 0; }
+
+.poster-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #fff;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.poster-sub {
+  margin-top: 3px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ─── 影院式详情页 ─────────────────────────── */
+.detail-scroll { scroll-behavior: smooth; }
+
+.detail-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 520px;
+  overflow: hidden;
+  z-index: 0;
+}
+.detail-backdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+  animation: hero-in 1.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.detail-backdrop-fade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top, var(--color-bg-base) 2%, rgba(8, 8, 16, 0.55) 55%, rgba(8, 8, 16, 0.35) 100%),
+    linear-gradient(to right, rgba(8, 8, 16, 0.8) 0%, rgba(8, 8, 16, 0.25) 70%, transparent 100%);
+}
+html:not(.dark) .detail-backdrop-fade {
+  background:
+    linear-gradient(to top, var(--color-bg-base) 2%, rgba(255, 255, 255, 0.65) 55%, rgba(255, 255, 255, 0.4) 100%),
+    linear-gradient(to right, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.35) 70%, transparent 100%);
+}
+
+.detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 100px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border-glass);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
+.detail-back:hover {
+  border-color: var(--color-border-accent);
+  color: var(--color-accent);
+}
+
+.detail-poster {
+  width: 232px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid var(--color-border-glass);
+  box-shadow: 0 28px 60px rgba(0, 0, 0, 0.55);
+  animation: scale-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.season-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border-radius: 100px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.season-tab:hover { color: var(--color-text-primary); border-color: var(--color-border-glass-hover); }
+.season-tab.active {
+  background: rgba(0, 212, 255, 0.14);
+  border-color: var(--color-border-accent);
+  color: var(--color-accent);
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.12);
+}
+/* 整季已看完：绿字绿边（放在 active 之后，普通状态下覆盖灰色基础色） */
+.season-tab.done {
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.5);
+}
+.season-tab.done:hover {
+  color: #6ee7b7;
+  border-color: rgba(52, 211, 153, 0.75);
+}
+/* 整季已看完 + 当前激活：选中仍以青色为主（查看中），绿色角标负责「已看完」信号 */
+.season-tab.done.active,
+.season-tab.done.active:hover {
+  color: var(--color-accent);
+  border-color: var(--color-border-accent);
+}
+/* 整季已看完角标：迷你绿圆点对勾，任何状态下都醒目 */
+.season-tab-done {
+  width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #34d399;
+  box-shadow: 0 1px 8px rgba(52, 211, 153, 0.6);
+}
+
+/* 集列表行 */
+.ep-row {
+  display: flex;
+  gap: 16px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  transition: border-color 0.25s, background 0.25s, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.dark .ep-row { background: rgba(255, 255, 255, 0.035); }
+.ep-row:hover {
+  border-color: rgba(0, 212, 255, 0.32);
+  background: var(--color-bg-surface-hover);
+  transform: translateX(3px);
+}
+
+.ep-still {
+  position: relative;
+  width: 188px;
+  aspect-ratio: 16 / 9;
+  flex-shrink: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #0d0d2b;
+}
+.ep-still img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s, filter 0.3s;
+}
+.ep-row:hover .ep-still img { transform: scale(1.07); }
+
+.ep-still-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.25s;
+  color: #000;
+}
+.ep-still-play > svg {
+  width: 38px;
+  height: 38px;
+  padding: 11px;
+  border-radius: 50%;
+  background: rgba(0, 212, 255, 0.94);
+  box-shadow: 0 8px 22px rgba(0, 212, 255, 0.45);
+}
+.ep-row:hover .ep-still-play { opacity: 1; }
+
+/* 已看完：整行绿色信号（不遮图、不变暗，比角落角标显眼） */
+.ep-row.watched {
+  border-radius: 12px;
+  background: rgba(52, 211, 153, 0.055);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.16);
+}
+.ep-row.watched .ep-still {
+  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.8);
+}
+.ep-row.watched h3 {
+  color: #34d399;
+}
+.ep-still-done-badge {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 3;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #34d399;
+  box-shadow: 0 2px 12px rgba(52, 211, 153, 0.6);
+}
+
+/* 看到一半：整行青色信号（与已看的绿色对偶，青色=进度中） */
+.ep-row.watching {
+  border-radius: 12px;
+  background: rgba(0, 212, 255, 0.045);
+  box-shadow: inset 0 0 0 1px rgba(0, 212, 255, 0.16);
+}
+.ep-row.watching .ep-still {
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.8);
+}
+.ep-row.watching h3 {
+  color: #5eead4;
+}
+.ep-still-watching {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 3;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #03222e;
+  background: #00d4ff;
+  box-shadow: 0 2px 12px rgba(0, 212, 255, 0.6);
+}
+
+.ep-action {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ep-action:hover {
+  color: var(--color-accent);
+  border-color: var(--color-border-accent);
+  background: rgba(0, 212, 255, 0.12);
+  transform: scale(1.06);
+}
+.ep-action.done {
+  color: #000;
+  background: #34d399;
+  border-color: #34d399;
+}
+.ep-action.done:hover {
+  color: #000;
+  background: #4ade80;
+  border-color: #4ade80;
+}
+
+/* 已收藏状态的按钮（详情页） */
+.btn.fav-on {
+  color: #ffd75e;
+  border-color: rgba(255, 215, 94, 0.4);
+  background: rgba(255, 215, 94, 0.12);
+}
+.btn.fav-on:hover {
+  color: #ffe28a;
+  border-color: rgba(255, 215, 94, 0.6);
+  background: rgba(255, 215, 94, 0.2);
+}
+
+/* ─── 设置页的「每行数量」调节 ─────────────── */
+.grid-size-value {
+  min-width: 30px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent);
+  background: rgba(0, 212, 255, 0.12);
+  border: 1px solid var(--color-border-accent);
+}
+
+.grid-size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.grid-size-btn {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  transition: all 0.15s;
+}
+.grid-size-btn:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-border-accent);
+  background: rgba(0, 212, 255, 0.1);
+}
+.grid-size-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* 滑杆：轨道用内联 linear-gradient 填色（已选青色 / 剩余底色） */
+.grid-size-range {
+  flex: 1;
+  height: 4px;
+  border-radius: 100px;
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+  cursor: pointer;
+}
+.grid-size-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid var(--color-bg-base);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+  cursor: grab;
+  transition: transform 0.15s;
+}
+.grid-size-range::-webkit-slider-thumb:hover { transform: scale(1.15); }
+.grid-size-range:active::-webkit-slider-thumb { cursor: grabbing; transform: scale(1.05); }
+
+/* 音乐播放条滑杆：进度条 / 音量条，与 grid-size-range 同风格（可调宽度） */
+.music-range {
+  height: 4px;
+  border-radius: 100px;
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+  cursor: pointer;
+}
+.music-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid var(--color-bg-base);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+  cursor: grab;
+  transition: transform 0.15s;
+}
+.music-range::-webkit-slider-thumb:hover { transform: scale(1.15); }
+.music-range:active::-webkit-slider-thumb { cursor: grabbing; transform: scale(1.05); }
+
+/* 音量竖条不显示滑块圆点：蓝灰渐变边界即位置指示，点按/拖动轨道仍有效 */
+.music-range-nothumb { cursor: ns-resize; }
+.music-range-nothumb::-webkit-slider-thumb {
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 音乐库行入场渐出：与游戏库封面同款 card-enter（translateY + scale + 淡入） */
+.music-row-enter {
+  animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 音乐库行手柄选中：收敛高亮 —— 覆盖通用 .gamepad-focus 的大外扩框
+   （outline 2px + offset 2px + 4px ring + 24px 辉光），改为贴行边缘的内侧细描边
+   + 柔和光晕，选中框面积明显减小 */
+.music-row.gamepad-focus {
+  outline: 1.5px solid var(--color-accent);
+  outline-offset: -1px;
+  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.10), 0 0 12px rgba(0, 212, 255, 0.14);
+  border-color: rgba(0, 212, 255, 0.4);
+}
+
+/* ─── 音乐列表拖拽排序 ───────────────────────── */
+/* 拖拽中：禁动画与过渡（行实时重排，松手零反馈），屏蔽指针事件（残留 hover 态会多行亮起） */
+.music-dragging .music-row {
+  animation: none;
+  transition: none !important;
+  pointer-events: none;
+}
+/* 被拖的原行隐藏，只留跟随指针的克隆 */
+.music-dragging .music-row.drag-src { opacity: 0; }
+/* 拖过一次后永久抑制入场动画重播（重排跨行重挂载会闪） */
+.music-drag-suppress .music-row-enter { animation: none; }
+
+/* ─── 音乐列表：当前播放行 ───────────────────── */
+/* 高亮靠底色 + 左侧竖条，不用 border-color —— .music-row 本身带 border-transparent，
+   hover 时要换成 border-glass，两边抢同一个属性会出现「悬停一下高亮就没了」。
+   左竖条用 ::before 画在 padding 内侧，行的圆角不会被它顶破 */
+.music-row-playing {
+  position: relative; /* ::before 的包含块；只给播放行加，不动其它行的定位 */
+  background: linear-gradient(90deg, rgba(0, 212, 255, 0.13) 0%, rgba(0, 212, 255, 0.04) 38%, transparent 72%);
+}
+.dark .music-row-playing {
+  background: linear-gradient(90deg, rgba(0, 212, 255, 0.16) 0%, rgba(0, 212, 255, 0.05) 38%, transparent 72%);
+}
+/* 这条渐变是无层级规则，会盖掉行上 hover:bg-bg-surface-hover（在 @layer utilities 内），
+   所以当前播放行悬停时得自己加一档亮度，否则鼠标划过它像是「没反应」 */
+.music-row-playing:hover {
+  background: linear-gradient(90deg, rgba(0, 212, 255, 0.20) 0%, rgba(0, 212, 255, 0.09) 38%, rgba(0, 212, 255, 0.03) 72%);
+}
+.music-row-playing::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 26px;
+  border-radius: 0 3px 3px 0;
+  background: var(--color-accent);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.55);
+}
+
+/* 封面上的均衡器：三根竖条错开相位跳动。暂停时冻结在当前高度而不是隐藏 ——
+   「有指示器但不动」比「指示器消失」更能说明这首歌只是暂停 */
+.eq-badge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(1px);
+}
+.eq-badge i {
+  width: 2.5px;
+  height: 12px;
+  border-radius: 1.5px;
+  background: var(--color-accent);
+  transform-origin: center;
+  animation: eq-bounce 0.9s ease-in-out infinite;
+}
+.eq-badge i:nth-child(2) { animation-delay: 0.3s; }
+.eq-badge i:nth-child(3) { animation-delay: 0.15s; }
+.eq-badge.paused i { animation-play-state: paused; }
+
+@keyframes eq-bounce {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+/* 减少动态效果：均衡器改成静止三根等高竖条（信息还在，只是不跳） */
+@media (prefers-reduced-motion: reduce) {
+  .eq-badge i { animation: none; transform: scaleY(0.7); }
+}
+
+/* ─── TMDB 候选选择 ────────────────────────── */
+.tmdb-option {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 14px;
+  cursor: pointer;
+  text-align: left;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  transition: border-color 0.2s, background 0.2s;
+}
+.dark .tmdb-option { background: rgba(255, 255, 255, 0.035); }
+.tmdb-option:hover {
+  border-color: rgba(0, 212, 255, 0.4);
+  background: var(--color-bg-surface-hover);
+}
+.tmdb-option.current { border-color: rgba(0, 212, 255, 0.35); }
+
+.tmdb-option-poster {
+  width: 62px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background: #0e1018;
+}
+
+.tmdb-option-pick {
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border-glass);
+  transition: all 0.2s;
+}
+.tmdb-option:hover .tmdb-option-pick {
+  color: #000;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* ─── 托盘右键菜单（自绘小窗，始终深色） ───── */
+.tray-menu {
+  padding: 4px;
+  border-radius: 6px;
+  background: #13151f;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.tray-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  color: #e0e0e0;
+  font-size: 13px;
+  font-weight: 450;
+  line-height: 1;
+  transition: background 0.12s;
+}
+.tray-menu-item:hover {
+  background: var(--color-bg-surface-active);
+}
+.tray-menu-item > svg {
+  color: rgba(255, 255, 255, 0.5);
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+}
+.tray-menu-item:hover > svg {
+  color: #fff;
+}
+.tray-menu-item.danger {
+  color: var(--color-danger);
+}
+.tray-menu-item.danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+.tray-menu-item.danger > svg {
+  color: var(--color-danger);
+}
+
+.tray-menu-sep {
+  height: 1px;
+  margin: 3px 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ─── 托盘菜单 · 正在播放区 ───────────────── */
+.tray-music {
+  padding: 6px 6px 4px;
+}
+
+/* 头部：封面 + 歌名/歌手（纯展示） */
+.tray-music-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  color: #e0e0e0;
+}
+
+.tray-music-cover {
+  width: 36px;
+  height: 36px;
+  border-radius: 5px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.4);
+}
+.tray-music-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tray-music-info {
+  flex: 1;
+  min-width: 0;
+}
+.tray-music-title {
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.25;
+  color: #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tray-music-artist {
+  font-size: 11px;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 迷你进度条：可点击/拖动 seek */
+.tray-music-track {
+  height: 3px;
+  margin: 5px 6px 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.tray-music-track:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.tray-music-track-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: #00d4ff;
+  transition: width 0.3s linear;
+}
+.tray-music-track:hover .tray-music-track-fill {
+  background: #33ddff;
+}
+/* 拖动中禁用过渡，fill 才跟手 */
+.tray-music-track:active .tray-music-track-fill {
+  transition: none;
+}
+
+/* 控制按钮行 */
+.tray-music-ctrl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 3px 0 4px;
+}
+.tray-music-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  transition: background 0.12s, color 0.12s;
+}
+.tray-music-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.tray-music-btn.tray-music-main {
+  background: rgba(0, 212, 255, 0.18);
+  color: #00d4ff;
+}
+.tray-music-btn.tray-music-main:hover {
+  background: rgba(0, 212, 255, 0.28);
+}
+
+/* 无播放时的占位（纯文本展示） */
+.tray-music-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12.5px;
+}
+.tray-music-empty > svg {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ─── Context Menu ─────────────────────────── */
+/* 悬停背景做成内缩胶囊：容器 .glass-card 是 16px 圆角且不裁剪（二级菜单
+   要溢出容器展开，加 overflow:hidden 会把它裁没），整宽直角背景会从圆角
+   缺口处漏到卡片外 —— 左右内缩 6px + 自身圆角，边角就压不出去了 */
+.context-menu-item {
+  width: calc(100% - 12px);
+  margin: 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.context-menu-item:hover {
+  background: var(--color-bg-surface-active);
+}
+
+.context-menu-item.text-danger {
+  color: var(--color-danger);
+}
+.context-menu-item.text-danger svg {
+  color: var(--color-danger);
+}
+.context-menu-item.text-danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.context-menu-divider {
+  height: 1px;
+  margin: 5px 12px; /* 比菜单项内缩(6px)再多 6px，分隔线不顶到胶囊边缘 */
+  background: var(--color-border-glass);
+}
+
+/* ═══════════════════════════════════════════════
+/* ═══════════════════════════════════════════════
+   统计页（StatsView / StatsCovers）—— 三列 · 横向行
+   本区块只新增，不覆盖任何已有规则
+   ═══════════════════════════════════════════════ */
+
+.stats-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 22px 20px;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* ─── 三列并排：左游戏 / 中影视 / 右音乐 ───
+   页面不滚动；三列撑满可视高度，头部固定、行列表各自内部滚动。
+   列数走 --cols 变量：设置页隐藏库时统计页去掉对应列，列宽自动均分
+   （1 列占满整行；媒体查询仍可覆盖，见下方 max-width:1200px）
+   列内滚动条不覆写，沿用全局默认（还原） */
+.stats-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+  gap: 16px;
+}
+
+.stats-col {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 16px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--color-border-glass);
+  border-top: 2px solid var(--cc);
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.stats-col-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.stats-col-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.stats-col-head h2 svg { color: var(--cc); }
+.stats-col-total {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--cc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stats-col-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  margin-bottom: 12px;
+}
+.stats-col-sub b { font-weight: 700; color: var(--color-text-secondary); }
+
+/* ─── 列内横向行列表：一行只有一个项目；超出列高时列内滚动 ───
+   滚动条贴到列卡片右缘：负 margin 抵消列的右 padding（16px），
+   行内容右缘仍保持与列边缘 18px 间距，位置不随滚动条移动。
+   滚动条颜色跟随列主题（--cc：游戏青 / 影视紫 / 音乐绿） */
+.stats-col-rows {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 18px 6px 0;
+  margin-right: -16px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--cc) 45%, transparent) transparent;
+}
+.stats-col-rows::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--cc) 45%, transparent);
+  border-radius: 4px;
+}
+.stats-col-rows::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--cc) 80%, transparent);
+}
+
+.stats-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 悬停 / 手柄聚焦：整行高亮 + 左侧色条 */
+.stats-row:hover,
+.stats-row-focus {
+  background: linear-gradient(to right, color-mix(in srgb, var(--cc) 10%, transparent), transparent 75%);
+  border-color: color-mix(in srgb, var(--cc) 35%, transparent);
+}
+.stats-row-focus {
+  outline: none;
+  box-shadow: inset 2px 0 0 var(--cc);
+}
+
+/* 封面：游戏/影视宽幅 16:9，音乐方形 72×72 */
+.stats-row-cover {
+  position: relative;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0e1018;
+  border: 1px solid var(--color-border-glass);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+html:not(.dark) .stats-row-cover { background: #e4e8f0; }
+
+/* 宽幅（banner/bg）：高度固定 72，宽度跟随图片比例 —— 封面完整显示、上下永不贴黑边。
+   min-width 只给宽幅：防止加载前图片未知宽度时缩成一条 */
+.stats-row-cover-wide {
+  height: 72px;
+  width: auto;
+  min-width: 128px;
+}
+.stats-row-cover-wide .stats-row-img {
+  height: 100%;
+  width: auto;
+  object-fit: contain;
+}
+
+.stats-row-cover-square {
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+}
+/* 无宽幅图时的竖版回退容器：2:3，与宽幅行同高（72px） */
+.stats-row-cover-portrait {
+  width: 48px;
+  height: 72px;
+}
+
+.stats-row-img {
+  width: 100%;
+  height: 100%;
+  /* contain：封面完整显示不裁切。banner 原图比例与容器不一致时（如 3:1 宽幅、竖版回退）
+     四周留边，由容器深色背景承接，不会缺角 */
+  object-fit: contain;
+  display: block;
+}
+.stats-row-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--cc) 18%, #12121e), #0d0d18);
+}
+
+/* 左上角名次角标（叠在封面上） */
+.stats-row-rank {
+  position: absolute;
+  top: 4px; left: 4px;
+  z-index: 2;
+  min-width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  color: #041018;
+  padding: 0 4px;
+}
+
+.stats-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stats-row-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stats-row-sub {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-row-meta {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 96px;
+}
+.stats-row-time {
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.stats-row-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.stats-col-empty {
+  padding: 36px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--color-text-tertiary);
+  border: 1px dashed var(--color-border-glass);
+  border-radius: 12px;
+}
+
+/* ─── 空态 / 加载态 ─── */
+.stats-empty-orb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 86px; height: 86px;
+  border-radius: 50%;
+  color: var(--color-accent);
+  background: radial-gradient(circle, rgba(0, 212, 255, 0.16) 0%, transparent 70%);
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  animation: float 3s ease-in-out infinite;
+}
+
+.stats-skeleton-pulse { animation: stats-pulse 1.4s ease-in-out infinite; }
+@keyframes stats-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+
+/* 窄窗口（minWidth 960）：三列压成单列堆叠 */
+@media (max-width: 1200px) {
+  .stats-cols { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 从托盘唤回时跳过入场动画：与已有 [data-skip-animations] 规则同理 */
+[data-skip-animations] .stats-row { animation: none !important; }
+
+/* ─── 浅色主题适配覆盖（只加不改：深色模式的基础规则一字不动） ───
+   浅色主题的修复全部收敛在这里，用 html:not(.dark) 限定作用域；
+   深色模式继续吃上面的基础规则，渲染结果与改动前完全一致 */
+
+/* 悬停预览卡固定深色毛玻璃（悬停浮层刻意不受主题影响），但内部文字继承
+   主题色 —— 浅色主题下深底深字不可读，强制卡内文字固定浅色 */
+html:not(.dark) .game-preview-card {
+  color: #f2f4f8;
+}
+html:not(.dark) .game-preview-card .text-text-secondary {
+  color: rgba(226, 232, 240, 0.72);
+}
+/* 预览卡占位块（无横屏封面）：深色块内的 text-text-tertiary 在浅色主题下
+   是深灰 → 不可见，固定浅灰 */
+html:not(.dark) .game-preview-placeholder .text-text-tertiary {
+  color: rgba(148, 163, 184, 0.85);
+}
+
+/* 剧集行状态色：浅色主题下 #34d399/#5eead4 在白底对比度不足，
+   换深绿/深青，行背景与描边也加深一档（状态可辨） */
+html:not(.dark) .ep-row.watched h3 { color: #059669; }
+html:not(.dark) .ep-row.watched {
+  background: rgba(52, 211, 153, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.3);
+}
+html:not(.dark) .ep-row.watching h3 { color: #0d9488; }
+html:not(.dark) .ep-row.watching {
+  background: rgba(0, 212, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(0, 212, 255, 0.3);
+}
+
+/* 统计页无封面占位：深色渐变在浅色主题下是深底深字（text-tertiary），
+   换浅色渐变；文字色（主题变量）在浅底上自然可读 */
+html:not(.dark) .stats-row-blank {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--cc) 14%, #eef0f4), #e2e6ec);
+}
+
+/* 危险按钮 hover：浅色主题下 #fca5a5 浅红字配浅红底比常态更难读，保持常态红 */
+html:not(.dark) .btn-danger:hover { color: #ef4444; }
+
+/* 剧照加载前占位：#0d0d2b 深蓝块在浅色主题里突兀，换浅灰渐变 */
+html:not(.dark) .ep-still {
+  background: linear-gradient(135deg, #e9ecf2, #d8dce6);
+}
+
+/* 无封面游戏的卡片占位（网格卡，原来内联深色渐变）：
+   深色模式吃本类基础渐变（与原来内联一致），浅色模式换浅色渐变 */
+.game-cover-fallback {
+  background: linear-gradient(135deg, #1a1a3e 0%, #0d0d2b 100%);
+}
+html:not(.dark) .game-cover-fallback {
+  background: linear-gradient(135deg, var(--color-bg-surface), var(--color-bg-surface-active));
+}
+
+/* 无封面影视的封面占位（详情页海报 / TMDB 消歧选项）：深紫渐变 + text-tertiary
+   在浅色主题下图标不可见，换浅色渐变（深色模式继续吃 Tailwind 的深紫渐变类） */
+html:not(.dark) .detail-poster-fallback,
+html:not(.dark) .tmdb-option-poster-fallback {
+  background: linear-gradient(135deg, var(--color-bg-surface), var(--color-bg-surface-active));
+}
+
+/* 影视详情页无背景图（bg/poster 都空）时，hero 白字叠在页面底色上：
+   浅色主题下不可读，补一层深色渐变承接（仿 backdrop 观感）；
+   深色模式页面深底已可读，保持现状不渲染 */
+.detail-backdrop-fallback {
+  display: none;
+  background: linear-gradient(180deg, #0d0d2b 0%, rgba(13, 13, 43, 0.65) 45%, transparent 100%);
+}
+html:not(.dark) .detail-backdrop-fallback {
+  display: block;
 }

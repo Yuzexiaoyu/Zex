@@ -1640,6 +1640,27 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
   box-shadow: none;
 }
 
+/* 指针高亮块：位置由 JS 按指针所在行算，滚动期间隐藏、停下立刻亮。
+   不用行上的 CSS :hover —— Chromium 滚动时不刷新 hover 命中测试，:hover 会粘在
+   滚动前那一行上。也不能把它放进滚动内容里：滚动由合成器线程完成，主线程改样式
+   至少晚一帧，那一帧它会跟着内容滑出一整格再跳回来，连续滚动就成了闪烁。
+   放在不滚动的外壳上，滚动不平移它，那一帧它只是原地多亮一下，肉眼无感。
+   left 对齐列表的 px-6；right 由 JS 按滚动条宽度改写 */
+.music-hl {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 0;
+  height: 64px; /* = ROW_H - 2，与行外层等高 */
+  box-sizing: border-box;
+  border: 1px solid var(--color-border-glass);
+  border-radius: 12px; /* = rounded-xl */
+  background-color: var(--color-bg-surface-hover);
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+
 /* 音乐库行入场渐出：与游戏库封面同款 card-enter（translateY + scale + 淡入） */
 .music-row-enter {
   animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -1678,11 +1699,8 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
 .dark .music-row-playing {
   background: linear-gradient(90deg, rgba(0, 212, 255, 0.16) 0%, rgba(0, 212, 255, 0.05) 38%, transparent 72%);
 }
-/* 这条渐变是无层级规则，会盖掉行上 hover:bg-bg-surface-hover（在 @layer utilities 内），
-   所以当前播放行悬停时得自己加一档亮度，否则鼠标划过它像是「没反应」 */
-.music-row-playing:hover {
-  background: linear-gradient(90deg, rgba(0, 212, 255, 0.20) 0%, rgba(0, 212, 255, 0.09) 38%, rgba(0, 212, 255, 0.03) 72%);
-}
+/* 播放行不加 :hover 规则 —— 悬停反馈来自下层的 .music-hl 高亮块，从这条渐变的
+   透明区域透出（右侧 72% 之后完全透明）。用 :hover 会在滚动时粘在旧行上 */
 .music-row-playing::before {
   content: '';
   position: absolute;

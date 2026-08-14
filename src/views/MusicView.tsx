@@ -151,6 +151,91 @@ export default function MusicView() {
   const dragging = drag?.active === true;
   const displayList = liveTracks ?? baseList;
 
+  // ─── 指针高亮 ─────────────────────────────
+  // 不走 CSS :hover —— Chromium 滚动时不刷新 hover 命中测试，滚轮滚动会把高亮
+  // 粘在滚动前那一行；而用「滚动中禁 hover」的 CSS 去压它，又会连 JS 点亮的行
+  // 一起压掉（两条规则抢同一个 background-color，禁 hover 那条特异性更高）。
+  //
+  // 滚动跑在合成器线程上，主线程收到 scroll 事件时画面已经滚过去了 —— 无论
+  // 用 rAF 还是同步处理，主线程改高亮至少晚一帧。这一帧里旧行的高亮跟着内容
+  // 滑走，下一帧才跳回指针处，连续滚动就成了闪烁。所以滚动期间干脆不亮，
+  // 停下来立刻亮在指针所在行（比原生 :hover 还准 —— 它得等鼠标动一下才更新）。
+  //
+  // 高亮块放在滚动容器外面（外壳的 absolute 定位），滚动不会平移它：滚动第一帧
+  // 那个还没来得及熄灭的高亮是原地不动的，肉眼无感；若把它放进滚动内容里，
+  // 这一帧它会跟着内容滑出一整格，那正是之前看到的残影
+  const hlRef = useRef<HTMLDivElement>(null);
+  const ptrClientYRef = useRef<number | null>(null);
+  const ptrClientXRef = useRef<number | null>(null);
+  const ptrInListRef = useRef(false);
+  const scrollingRef = useRef(false);
+  const scrollIdleRef = useRef(0);
+  const hlRafRef = useRef(0);
+  const hideHl = () => {
+    const hl = hlRef.current;
+    if (hl) hl.style.opacity = '0';
+  };
+  const paintHl = () => {
+    hlRafRef.current = 0;
+    const hl = hlRef.current;
+    const el = listRef.current;
+    if (!hl || !el) return;
+    const y = ptrClientYRef.current;
+    // 滚动中 / 拖拽中 / 指针不在列表 / 空列表 → 不亮
+    if (scrollingRef.current || y === null || !ptrInListRef.current
+      || dragRef.current !== null || displayList.length === 0) { hideHl(); return; }
+    const rect = el.getBoundingClientRect();
+    const x = ptrClientXRef.current;
+    // 指针压在滚动条上（容器右缘）：拖滚动条时 Y→行 的映射没有意义，不亮
+    if (x !== null && x > rect.right - 14) { hideHl(); return; }
+    const cur = Math.max(0, Math.min(displayList.length - 1,
+      Math.floor((y - rect.top + el.scrollTop) / ROW_H)));
+    hl.style.top = `${cur * ROW_H - el.scrollTop}px`;
+    // 右缘让开滚动条，跟行宽严丝合缝（滚动条出现/消失时宽度会变，每次重算）
+    hl.style.right = `${24 + el.offsetWidth - el.clientWidth}px`;
+    hl.style.opacity = '1';
+  };
+  const scheduleHl = () => { if (!hlRafRef.current) hlRafRef.current = requestAnimationFrame(paintHl); };
+  const endScrolling = () => {
+    if (scrollIdleRef.current) { window.clearTimeout(scrollIdleRef.current); scrollIdleRef.current = 0; }
+    scrollingRef.current = false;
+    paintHl();
+  };
+  const onListScroll = () => {
+    scrollingRef.current = true;
+    hideHl(); // 同步熄灭，不等 rAF
+    if (scrollIdleRef.current) window.clearTimeout(scrollIdleRef.current);
+    scrollIdleRef.current = window.setTimeout(endScrolling, 90); // scrollend 的兜底
+  };
+  const onListPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
+    const moved = e.clientX !== ptrClientXRef.current || e.clientY !== ptrClientYRef.current;
+    ptrClientXRef.current = e.clientX;
+    ptrClientYRef.current = e.clientY;
+    ptrInListRef.current = true;
+    // 鼠标真的动了 → 用户在指，立刻恢复高亮。滚动后浏览器补发的 mousemove
+    // 坐标没变，不会误判成「鼠标动了」
+    if (moved && scrollingRef.current) endScrolling();
+    else scheduleHl();
+  };
+  const onListPointerLeave = () => {
+    ptrInListRef.current = false;
+    hideHl(); // 同步灭掉，不等下一帧
+  };
+  // 列表内容变了（搜索/排序/删除）→ 原行号失配，按当前指针位置重算一次
+  useEffect(() => { paintHl(); }, [displayList.length]);
+  // scrollend：滚动真正停止（含惯性尾段）时立刻恢复高亮，比 90ms 兜底快
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    el.addEventListener('scrollend', endScrolling);
+    return () => {
+      el.removeEventListener('scrollend', endScrolling);
+      if (hlRafRef.current) cancelAnimationFrame(hlRafRef.current);
+      if (scrollIdleRef.current) window.clearTimeout(scrollIdleRef.current);
+    };
+  }, []);
+
   // 虚拟滚动：172+ 曲全量渲染约 3k DOM 节点，每次重渲染都要重建整棵树。
   // 行高固定（封面 44 + py 10×2 + space-y-0.5 间距 2 = 66），不需要动态测量，
   // 与下方 getTargetIndex 的 step 同源 —— 改行高要两处一起改
@@ -429,7 +514,16 @@ export default function MusicView() {
       </div>
 
       {/* ─── 曲目列表 ────────────────────────── */}
-      <div ref={listRef} className={clsx('flex-1 min-h-0 overflow-y-auto px-6 pb-6', dragging && 'music-dragging', everDragged && 'music-drag-suppress')}>
+      {/* 外壳不滚动：只作为指针高亮块的定位参照和裁剪框。高亮块必须待在滚动内容
+          外面，否则滚动会把它跟着内容一起平移（见 paintHl 上方注释） */}
+      <div className="relative flex-1 min-h-0 overflow-hidden">
+      <div ref={hlRef} className="music-hl" aria-hidden />
+      <div ref={listRef}
+        onScroll={onListScroll}
+        onPointerMove={onListPointerMove}
+        onPointerEnter={() => { ptrInListRef.current = true; }}
+        onPointerLeave={onListPointerLeave}
+        className={clsx('h-full overflow-y-auto px-6 pb-6', dragging && 'music-dragging', everDragged && 'music-drag-suppress')}>
         {tracks.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center gap-6">
             <div className="relative">
@@ -468,11 +562,9 @@ export default function MusicView() {
               >
               <div
                 className={clsx(
-                  'music-row group flex items-center gap-3 px-4 h-full rounded-xl border border-transparent transition-all',
-                  // 亮起瞬变：快速划过时每行都会瞬间亮起，不因 150ms 过渡来不及显示而"没亮"；
-                  // 熄灭（解除 hover）时 transition 恢复 → 保留 150ms 淡出
-                  'hover:transition-none',
-                  'hover:bg-bg-surface-hover hover:border-border-glass cursor-pointer',
+                  // 行本身不带 hover 背景 —— 悬停高亮由列表外壳上的 .music-hl
+                  // 高亮块负责（CSS :hover 在滚动时不刷新，会粘在旧行上）
+                  'music-row group flex items-center gap-3 px-4 h-full rounded-xl border border-transparent cursor-pointer',
                   // 只在挂载后的入场窗口内加动画，之后滚动挂载的行不带动画
                   !everDragged && introWindow && 'music-row-enter',
                   dragEnabled && 'touch-none select-none', // 拖拽时防原生拖拽/选字；光标保持 pointer（点击=播放）
@@ -566,6 +658,7 @@ export default function MusicView() {
             })}
           </div>
         )}
+      </div>
       </div>
 
       {/* 拖拽克隆：跟随指针（只保留封面/歌名/歌手，精简渲染） */}

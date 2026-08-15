@@ -12,6 +12,7 @@ import {
   Minus, X
 } from 'lucide-react';
 import zexLogo from './assets/zex-logo.png';
+import { coverSrc } from './utils/media';
 import { clsx } from 'clsx';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -67,6 +68,9 @@ export default function App() {
   const statsGroup = firstVisibleStatsGroup(hiddenLibraries);
   const groupOf = (v: View) => (v === 'stats' ? statsGroup : VIEW_GROUP[v]);
   const runningGameId = useAppStore((s) => s.runningGameId);
+  // 自定义品牌（设置页「软件标识」）：空 = 默认 ZEX / 内置 logo
+  const brandName = useAppStore((s) => s.brandName);
+  const brandCover = useAppStore((s) => s.brandCover);
   const appWindow = getCurrentWindow();
   const [showAddModal, setShowAddModal] = useState(false);
   // 顶部导航按隐藏库过滤（设置页固定可见）；activeView 若落在隐藏入口上由下方 effect 修正。
@@ -104,6 +108,15 @@ export default function App() {
       window.removeEventListener('pointerdown', toMouse, { capture: true } as EventListenerOptions);
       window.removeEventListener('wheel', toMouse, { capture: true } as EventListenerOptions);
     };
+  }, []);
+
+  // ── 全局右键收口：没有自定义右键菜单的区域一律不弹 WebView2 默认菜单 ──
+  // 自定义菜单组件各自已 preventDefault（事件冒泡后重复调用无副作用）；只拦
+  // contextmenu 事件，Ctrl+C/V/X/A、F12 devtools、左键拖拽等全部不受影响
+  useEffect(() => {
+    const block = (e: Event) => e.preventDefault();
+    window.addEventListener('contextmenu', block);
+    return () => window.removeEventListener('contextmenu', block);
   }, []);
 
   // 顶部导航（游戏库/影视库/设置）注册为手柄焦点组；「下」进入当前视图内容
@@ -335,15 +348,16 @@ export default function App() {
       <header className="relative z-10 shrink-0 glass border-b border-border-glass" data-tauri-drag-region>
         <div className="flex items-center h-16 px-6 gap-6">
           {/* Logo */}
-          <div className="flex items-center gap-2.5 mr-2">
+          <div className="flex items-center gap-2.5 mr-2 min-w-0">
             <img
-              src={zexLogo}
-              alt="ZEX"
+              src={brandCover ? coverSrc(brandCover) : zexLogo}
+              alt={brandName || 'ZEX'}
               draggable={false}
-              className="w-8 h-8 object-contain"
+              className="w-8 h-8 object-contain shrink-0"
               style={{ filter: 'drop-shadow(0 0 5px rgba(0,212,255,0.35))' }}
+              onError={(e) => { (e.currentTarget as HTMLImageElement).src = zexLogo; }}  // 自定义封面缺失/损坏回退内置 logo
             />
-            <span className="text-lg font-bold tracking-tight text-glow-accent">ZEX</span>
+            <span className="text-lg font-bold tracking-tight text-glow-accent truncate max-w-[200px]">{brandName || 'ZEX'}</span>
           </div>
 
           {/* Nav pills（隐藏的库不渲染） */}

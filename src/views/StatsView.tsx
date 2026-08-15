@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
-import { BarChart3, Gamepad2, Film, Music } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { BarChart3, Gamepad2, Film, Music, Clock } from 'lucide-react';
 import { useAppStore } from '../store';
 import { useFocusIndex, useFocusStore, useGamepadGroup, useRightStickScrollIf } from '../gamepad';
-import type { Stats } from '../types';
+import type { Stats, TopEntry } from '../types';
 import { RowCard, longDur, MEDIA_COLORS } from '../components/StatsCovers';
+import StatsAdjustModal from '../components/StatsAdjustModal';
 
 const SECTIONS = [
   // 次数只统计音乐（games/series 的 count 恒为 0，前端不显示）
@@ -41,10 +43,11 @@ const colIdx: Record<SectionKey, number> = { game: 0, video: 0, music: 0 };
 
 /** 单列：类别标题 + 总时长 + 封面网格。
  *  每个类别一个手柄焦点组（'stats:col:xxx'）——左右键跨列、上下键在列内移动 */
-function ColSection({ stats, section, colOrder }: {
+function ColSection({ stats, section, colOrder, onOpenMenu }: {
   stats: Stats;
   section: (typeof SECTIONS)[number];
   colOrder: SectionKey[];  // 可见列顺序（隐藏的库不在内），手柄左右跨列按它跳转
+  onOpenMenu: (e: React.MouseEvent, entry: TopEntry) => void; // 行右键（仅游戏列绑定）
 }) {
   const d = stats[section.key];
   const Icon = section.icon;
@@ -120,6 +123,8 @@ function ColSection({ stats, section, colOrder }: {
               rank={i + 1}
               focused={focusedIndex === i}
               anchor={`${section.key}-${i}`}
+              // 右键调整时长只给游戏列（影视/音乐行不绑，保持无右键行为）
+              onContextMenu={section.key === 'game' ? (ev) => onOpenMenu(ev, e) : undefined}
             />
           ))}
         </div>
@@ -136,11 +141,30 @@ export default function StatsView() {
   // 隐藏的库 → 统计页去掉对应列（数据一次拉全量，只影响展示）
   const hiddenLibraries = useAppStore((s) => s.hiddenLibraries);
   const [error, setError] = useState<string | null>(null);
+  // 游戏行右键菜单与「调整时长」弹窗（均为纯鼠标功能，不注册手柄组）
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: TopEntry } | null>(null);
+  const [adjusting, setAdjusting] = useState<TopEntry | null>(null);
 
   useEffect(() => {
     setError(null);
     loadStats().catch((e) => setError(typeof e === 'string' ? e : (e?.message ?? String(e))));
   }, []);
+
+  const refreshStats = async () => {
+    setError(null);
+    try {
+      await loadStats();
+    } catch (e) {
+      setError(typeof e === 'string' ? e : (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  // 游戏行右键：记菜单位置（事件需 stopPropagation，否则冒泡到页面容器被当成空白右键关掉）
+  const openRowMenu = (e: React.MouseEvent, entry: TopEntry) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY, entry });
+  };
 
   // 空态判断看库存量而非总时长：添加了游戏但还没玩过（总时长为 0）时，
   // 游戏列仍要展示「未游玩」条目，不能整页显示「还没有任何记录」
@@ -189,12 +213,102 @@ export default function StatsView() {
     <div className="h-full">
       <div className="stats-page">
         {/* 列数走 CSS 变量而非内联 gridTemplateColumns：内联会压过窄窗口（≤1200px）的单列媒体查询 */}
-        <div className="stats-cols" style={{ ['--cols' as string]: visibleSections.length }}>
+        <div
+          className="stats-cols"
+          style={{ ['--cols' as string]: visibleSections.length }}
+          // 右键空白区域关菜单（与游戏库/影视库容器行为一致）
+          onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
+        >
           {visibleSections.map((s) => (
-            <ColSection key={s.key} stats={stats} section={s} colOrder={visibleOrder} />
+            <ColSection key={s.key} stats={stats} section={s} colOrder={visibleOrder} onOpenMenu={openRowMenu} />
           ))}
         </div>
       </div>
+
+      {/* 游戏行右键菜单（纯鼠标：外部点击 / Esc / 空白右键关闭） */}
+      {menu && (
+        <StatsRowMenu
+          x={menu.x}
+          y={menu.y}
+          name={menu.entry.name}
+          onClose={() => setMenu(null)}
+          onAdjust={() => setAdjusting(menu.entry)}
+        />
+      )}
+
+      {/* 调整时长弹窗 */}
+      {adjusting && (
+        <StatsAdjustModal
+          entry={adjusting}
+          onClose={() => setAdjusting(null)}
+          onSaved={() => {
+            setAdjusting(null);
+            void refreshStats();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/** 游戏行右键菜单：样式对齐 SeriesContextMenu（glass-card + context-menu-item + 视口 clamp）。
+ *  纯鼠标功能，不注册手柄焦点组；统计页只有行上有右键，空白右键/外部点击/Esc 都可关闭 */
+function StatsRowMenu({ x, y, name, onAdjust, onClose }: {
+  x: number;
+  y: number;
+  name: string;
+  onAdjust: () => void;
+  onClose: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  const [measured, setMeasured] = useState(false);
+
+  // Clamp to viewport after measuring real size (first frame hidden)
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    setPos({
+      left: Math.max(8, Math.min(x, window.innerWidth - el.offsetWidth - 8)),
+      top: Math.max(8, Math.min(y, window.innerHeight - el.offsetHeight - 8)),
+    });
+    setMeasured(true);
+  }, [x, y]);
+
+  // 外部点击 / Esc 关闭（菜单只有一项，无手柄组可兜底，鼠标路径必须闭环）
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="fixed z-[100]"
+      style={{ left: pos.left, top: pos.top, visibility: measured ? 'visible' : 'hidden' }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div className="glass-card w-52 py-1.5 animate-scale-in">
+        <button
+          onClick={() => { onClose(); onAdjust(); }}
+          className="context-menu-item"
+          title={name}
+        >
+          <Clock size={14} className="text-[#00d4ff]" />
+          调整时长
+        </button>
+      </div>
+    </div>,
+    document.body,
   );
 }

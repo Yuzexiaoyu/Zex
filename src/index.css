@@ -95,18 +95,10 @@ html.app-blank body > * { visibility: hidden; }
   background: var(--color-bg-surface);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--color-border-glass);
+  /* 边框直接用高亮色常驻：悬停不再有边缘变化（原 :hover 的 border-color 提升并入基类） */
+  border: 1px solid var(--color-border-glass-hover);
   border-radius: 16px;
-  transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s, background 0.3s;
-}
-
-.glass-card:hover {
-  border-color: var(--color-border-glass-hover);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-}
-
-.dark .glass-card:hover {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  transition: box-shadow 0.3s, transform 0.3s, background 0.3s;
 }
 
 .glass-modal {

@@ -450,10 +450,20 @@ export async function downloadCover(url: string, name: string, type: 'cover' | '
   return invoke('download_cover', { url, name, coverType: type });
 }
 
+// 自定义品牌封面（设置页「软件标识」）：把本地图片复制进 covers 目录（brand.<ext>），返回存储路径
+export async function setBrandCover(source: string): Promise<string> {
+  return invoke('set_brand_cover', { source });
+}
+
 // ─── Stats ────────────────────────────────
 
 export async function getStats(): Promise<Stats> {
   return invoke('get_stats');
+}
+
+// 手动调整游戏累计时长（统计页右键「调整时长」）；秒数由后端钳制为 ≥ 0
+export async function setGameSeconds(id: string, seconds: number): Promise<void> {
+  return invoke('set_game_seconds', { id, seconds });
 }
 
 // ─── Settings ─────────────────────────────

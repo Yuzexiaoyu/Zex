@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Settings as SettingsIcon, Sun, Moon, Monitor, MonitorPlay, FolderOpen, Download, Upload, ExternalLink, KeyRound, Trash2, Loader2, Minus, Plus, Cpu, AlertTriangle, Gamepad2, X, Power } from 'lucide-react';
+import { Settings as SettingsIcon, Sun, Moon, Monitor, MonitorPlay, FolderOpen, Download, Upload, ExternalLink, KeyRound, Trash2, Loader2, Minus, Plus, Cpu, AlertTriangle, Gamepad2, X, Power, Image as ImageIcon } from 'lucide-react';
 import zexLogo from '../assets/zex-logo.png';
+import { coverSrc } from '../utils/media';
 import { clsx } from 'clsx';
 import * as api from '../api';
 import { message, save, open } from '@tauri-apps/plugin-dialog';
@@ -18,6 +19,12 @@ export default function SettingsView() {
   const loadPlaylists = useAppStore((s) => s.loadPlaylists);
   const gameColumns = useAppStore((s) => s.gameColumns);
   const setGameColumns = useAppStore((s) => s.setGameColumns);
+  // 品牌（软件标识）：名称 onBlur 落库；封面选图后落库；恢复默认清空
+  const brandCover = useAppStore((s) => s.brandCover);
+  const saveBrandName = useAppStore((s) => s.saveBrandName);
+  const saveBrandCover = useAppStore((s) => s.saveBrandCover);
+  const resetBrandCover = useAppStore((s) => s.resetBrandCover);
+  const [brandNameInput, setBrandNameInput] = useState(() => useAppStore.getState().brandName);
   const hiddenLibraries = useAppStore((s) => s.hiddenLibraries);
   const setLibraryHidden = useAppStore((s) => s.setLibraryHidden);
   const columnsPct = ((gameColumns - MIN_GAME_COLUMNS) / (MAX_GAME_COLUMNS - MIN_GAME_COLUMNS)) * 100;
@@ -414,6 +421,21 @@ export default function SettingsView() {
 
   const savePlayerPath = () => savePlayerSetting('player_path', playerPath.trim());
 
+  // 品牌封面：选本地图片 → 后端复制进 covers 目录 → 存路径（空 = 内置 logo）
+  const handlePickBrandCover = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      });
+      if (typeof selected !== 'string') return;
+      const stored = await api.setBrandCover(selected);
+      await saveBrandCover(stored);
+    } catch (err) {
+      alert(typeof err === 'string' ? err : '更换封面失败，请检查图片格式与大小');
+    }
+  };
+
   const handleExport = async () => {
     setExporting(true);
     try {
@@ -520,7 +542,7 @@ export default function SettingsView() {
               <p className="text-sm font-medium mb-0.5">游戏库每行数量</p>
               <p className="text-xs text-text-secondary">调整封面网格的列数，拖动即时生效并自动记住</p>
             </div>
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-5 shrink-0">
               <div className="grid-size-row w-[180px]">
                 <button
                   className="grid-size-btn"
@@ -981,8 +1003,58 @@ export default function SettingsView() {
         </div>
       </section>
 
+      {/* 软件标识：自定义顶部封面与名称（空 = 默认 ZEX / 内置 logo） */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">软件标识</h2>
+        <div className="glass-card overflow-hidden">
+          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5')}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5">软件名称</p>
+              <p className="text-xs text-text-secondary leading-snug">
+                显示在顶部栏，留空恢复默认「ZEX」
+              </p>
+            </div>
+            <input
+              type="text"
+              value={brandNameInput}
+              onChange={(e) => setBrandNameInput(e.target.value)}
+              onBlur={() => void saveBrandName(brandNameInput)}
+              placeholder="ZEX"
+              maxLength={30}
+              className="input flex-1 text-sm shrink-0 max-w-[260px]"
+            />
+          </div>
+          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass')}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5">软件封面</p>
+              <p className="text-xs text-text-secondary leading-snug">
+                顶部栏的 Logo，支持 png / jpg / webp（≤ 10MB），建议透明背景
+              </p>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <img
+                src={brandCover ? coverSrc(brandCover) : zexLogo}
+                alt="封面预览"
+                draggable={false}
+                className="w-10 h-10 object-contain rounded-lg bg-bg-surface border border-border-glass"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).src = zexLogo; }}
+              />
+              <button onClick={handlePickBrandCover} className="btn btn-glass gap-2 text-sm px-4">
+                <ImageIcon size={14} />
+                更换封面
+              </button>
+              {brandCover && (
+                <button onClick={() => void resetBrandCover()} className="btn btn-glass text-sm px-4 text-text-secondary">
+                  恢复默认
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* About */}
-      <section>
+      <section className="mb-8">
         <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">关于</h2>
         <div className="glass-card p-6">
           <div className="flex items-center gap-3 mb-4">

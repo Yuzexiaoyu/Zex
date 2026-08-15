@@ -5392,10 +5392,56 @@ async fn download_cover(state: State<'_, AppState>, url: String, game_id: String
     Ok(path.to_string_lossy().to_string())
 }
 
+/// 自定义品牌封面（设置页「软件标识」）：把本地图片复制进 covers 目录
+/// （固定名 brand.<ext>，替换时清掉旧的 brand.*，不残留），返回存储路径。
+/// 前端 convertFileSrc('covers') 直接可显示；格式 png/jpg/webp，上限 10MB
+#[tauri::command(async)]
+fn set_brand_cover(state: State<'_, AppState>, source: String) -> AppResult<String> {
+    let src = std::path::Path::new(&source);
+    if !src.is_file() {
+        return Err(AppError::Custom("图片文件不存在".into()));
+    }
+    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp") {
+        return Err(AppError::Custom("仅支持 png / jpg / webp 图片".into()));
+    }
+    if src.metadata().map(|m| m.len() > 10 * 1024 * 1024).unwrap_or(false) {
+        return Err(AppError::Custom("图片不能超过 10MB".into()));
+    }
+    let covers_dir = state.data_dir.join("covers");
+    fs::create_dir_all(&covers_dir)?;
+    // 清掉旧品牌图（用户可能换过扩展名），再写新文件
+    if let Ok(entries) = fs::read_dir(&covers_dir) {
+        for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with("brand.") {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+    let target = covers_dir.join(format!("brand.{}", ext));
+    fs::copy(src, &target)?;
+    Ok(target.to_string_lossy().to_string())
+}
+
 // ─────────────────────────────────────────────
 // Tauri Commands - Stats
 // ─────────────────────────────────────────────
 
+/// 手动调整游戏累计时长（统计页右键「调整时长」）：直接覆盖 total_seconds，
+/// 与播放会话结算共用同一字段，下次游玩增量照常累加。负数钳制为 0
+#[tauri::command(async)]
+fn set_game_seconds(state: State<'_, AppState>, id: String, seconds: i64) -> AppResult<()> {
+    let seconds = seconds.max(0);
+    let conn = state.db.lock();
+    let changed = conn.execute(
+        "UPDATE games SET total_seconds = ?1 WHERE id = ?2",
+        params![seconds, id],
+    )?;
+    if changed == 0 {
+        return Err(AppError::Custom("该游戏已被删除".to_string()));
+    }
+    Ok(())
+}
 
 #[tauri::command(async)]
 fn get_stats(state: State<'_, AppState>) -> AppResult<Stats> {
@@ -7477,9 +7523,9 @@ pub fn run() {
             get_episodes, create_episode, update_episode, delete_episode,
             update_watch_progress, mark_episode_watched, touch_episode_played,
             // Covers
-            search_covers, download_cover,
+            search_covers, download_cover, set_brand_cover,
             // Stats
-            get_stats,
+            get_stats, set_game_seconds,
             // Settings
             get_setting, set_setting, set_hidden_libraries, set_guide_button_enabled, set_ps_button_enabled,
             // Autostart

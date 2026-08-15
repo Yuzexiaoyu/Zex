@@ -120,6 +120,13 @@ function DesktopLyricsBody() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked]);
 
+  // 歌词窗口同样收口右键：透明窗上弹浏览器默认菜单最碍眼，原生菜单一律不出现
+  useEffect(() => {
+    const block = (e: Event) => e.preventDefault();
+    window.addEventListener('contextmenu', block);
+    return () => window.removeEventListener('contextmenu', block);
+  }, []);
+
   // 初始快照 + 设置 + 事件订阅
   useEffect(() => {
     void refresh();

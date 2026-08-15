@@ -61,6 +61,8 @@ interface AppState {
   selectedSeasonId: string | null;
   theme: ThemeMode;
   gameColumns: number;   // 游戏库每行卡片数（设置页可调，写入 settings 表持久化）
+  brandName: string;     // 自定义软件名称（设置页「软件标识」，空 = ZEX）
+  brandCover: string;    // 自定义封面路径（空 = 内置 logo）
   contentVisible: boolean; // false = 界面画成空白帧，收进托盘前的准备动作
   escInterceptCount: number; // >0 = 有浮层在消费 Esc，全局「Esc=收托盘」让位
   // 元数据抓取进度（全局，跨库保留）：切库再回来面板不丢、防二次触发
@@ -83,6 +85,9 @@ interface AppState {
   setSelectedSeasonId: (id: string | null) => void;
   setTheme: (theme: ThemeMode) => void;
   setGameColumns: (n: number) => void;
+  saveBrandName: (name: string) => Promise<void>;
+  saveBrandCover: (path: string) => Promise<void>;
+  resetBrandCover: () => Promise<void>;
   setLibraryHidden: (id: 'games' | 'series' | 'music' | 'stats', hidden: boolean) => void;
   loadPreferences: () => Promise<void>;
   setContentVisible: (v: boolean) => void;
@@ -166,6 +171,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedSeasonId: null,
   theme: 'dark',
   gameColumns: 8,
+  brandName: '',
+  brandCover: '',
   contentVisible: true,
   escInterceptCount: 0,
   metadataFetchingTitle: null,
@@ -251,6 +258,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     void api.setSetting('game_columns', String(clamped)).catch(() => {});
   },
 
+  // 品牌名/封面（设置页「软件标识」）：立即生效 + 落库，空 = 默认 ZEX/内置 logo
+  saveBrandName: async (name) => {
+    const v = name.trim();
+    set({ brandName: v });
+    await api.setSetting('brand_name', v);
+  },
+  saveBrandCover: async (path) => {
+    set({ brandCover: path });
+    await api.setSetting('brand_cover', path);
+  },
+  resetBrandCover: async () => {
+    set({ brandCover: '' });
+    await api.setSetting('brand_cover', '');
+  },
+
   // 隐藏库：三个主库最多 2 个（至少保留 1 个可见），统计页不占名额可单独隐藏；
   // 走后端命令（联动 mpv 预加载）
   setLibraryHidden: (id, hidden) => {
@@ -296,6 +318,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       const statsHidden = valid.includes('stats') ? (['stats'] as const) : ([] as const);
       set({ hiddenLibraries: [...libs, ...statsHidden] });
     }
+    // 品牌名/封面：未设置（null）保持空 = 默认 ZEX / 内置 logo
+    const brandName = await api.getSetting('brand_name').catch(() => null);
+    if (brandName) set({ brandName });
+    const brandCover = await api.getSetting('brand_cover').catch(() => null);
+    if (brandCover) set({ brandCover });
   },
 
   createGame: async (game) => {

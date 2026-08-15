@@ -43,13 +43,14 @@ const FALLBACK_ICON = {
  *  宽幅缺失时回退到竖版 cover_path 裁切，都没有再回退占位。
  *  信息常驻可见（名称/副标题/时长），悬停或手柄聚焦时整行高亮。
  *  anchor 是手柄滚动定位用的 data 属性值（格式 `${media}-${index}`） */
-export function RowCard({ entry, media, color, rank, focused, anchor }: {
+export function RowCard({ entry, media, color, rank, focused, anchor, onContextMenu }: {
   entry: TopEntry;
   media: MediaKey;
   color: string;
   rank: number;
   focused?: boolean;
   anchor?: string;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const Icon = FALLBACK_ICON[media];
   const imgSrc = entry.wide_path || entry.cover_path;
@@ -59,6 +60,7 @@ export function RowCard({ entry, media, color, rank, focused, anchor }: {
       className={clsx('stats-row', focused && 'stats-row-focus')}
       style={{ ['--cc' as string]: color }}
       data-stat-cover={anchor}
+      onContextMenu={onContextMenu}
     >
       {/* 容器比例跟随图片形态：宽幅封面（banner/bg）用 16:9；音乐用方形；
           无宽幅图回退竖版封面时用 2:3 竖版容器 —— 配 contain 全程不裁切、不留怪边 */}

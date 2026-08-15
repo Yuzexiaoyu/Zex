@@ -49,6 +49,9 @@ pub enum SessionMode {
 
 pub struct Session {
     pipe: String,
+    /// 本会话 mpv 进程 PID。退出清理按 PID 等待/兜底 —— 这台机器上 sysinfo 的
+    /// 命令行读取被系统屏蔽（实测全空），不能靠 cmdline 匹配进程
+    pid: u32,
     /// 命令写端。连接线程建立后回填，所以启动瞬间可能还是 None
     writer: Option<File>,
     /// 当前条目 id：影视 = episodes.id，音乐 = tracks.id
@@ -561,7 +564,8 @@ fn quick_probe(pipe: &str, shutdown: &AtomicBool) -> bool {
 
 /// 拉一个空闲 mpv（不弹窗、不占任务栏）。配置/皮肤在启动时加载完毕，
 /// 点播放时只需 loadlist，免去进程 + 库 + 皮肤脚本的冷启动等待
-fn spawn_warm_mpv(app: &AppHandle, data_dir: &PathBuf) -> Option<String> {
+/// 返回 (管道名, 进程 PID)：PID 供退出清理等待/兜底（cmdline 匹配不可靠）
+fn spawn_warm_mpv(app: &AppHandle, data_dir: &PathBuf) -> Option<(String, u32)> {
     let mpv_exe = resolve_mpv(app)?;
     let config_dir = ensure_config_dir(app, data_dir);
     let (hwdec, hdr, slang, alang) = {
@@ -605,11 +609,10 @@ fn spawn_warm_mpv(app: &AppHandle, data_dir: &PathBuf) -> Option<String> {
     if let Some(dir) = mpv_exe.parent() {
         cmd.current_dir(dir);
     }
-    if cmd.spawn().is_err() {
-        return None;
-    }
+    // spawn 的 Child 在这里 drop（detach 继续跑）；pid 先取出来供跟踪
+    let child = cmd.spawn().ok()?;
     let _ = std::fs::write(warm_pipe_file(data_dir), &pipe);
-    Some(pipe)
+    Some((pipe, child.id()))
 }
 
 // 锁外 spawn 慢路径的串行锁：保证任何时刻最多拉一个实例（ensure 补拉与 acquire 并发
@@ -618,49 +621,42 @@ fn spawn_warm_mpv(app: &AppHandle, data_dir: &PathBuf) -> Option<String> {
 static WARM_SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
 /// 给预热实例发 quit（probe 超时收尾 / 优雅关闭）。实例刚拉起来可能还没建好管道，
-/// 连不上就交给 kill_warm_processes 强杀兜底
+/// 连不上就交给 kill_all_zex_mpv 强杀兜底
 fn quit_pipe(pipe: &str) {
     if let Some(mut f) = try_connect_pipe(pipe, 3, Duration::from_millis(100)) {
         let _ = send(&mut f, json!(["quit"]));
     }
 }
 
-/// 强杀命令行含 zex-mpv-warm（预热管道）的 mpv 进程。
-/// pipe_hint 只匹配指定管道（probe 超时收尾）；None = 杀全部预热（退出清理）。
-/// 播放会话的管道是 zex-mpv-（不含 warm），绝不会被误杀
-fn kill_warm_processes(pipe_hint: Option<&str>) -> usize {
-    let mut sys = System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-    let mut killed = 0;
-    for (_, process) in sys.processes() {
-        let is_mpv = process.name().to_string_lossy().to_ascii_lowercase() == "mpv.exe";
-        let cmd = process.cmd();
-        if !is_mpv || !cmd.iter().any(|c| c.to_string_lossy().contains("zex-mpv-warm")) {
-            continue;
-        }
-        if let Some(hint) = pipe_hint {
-            if !cmd.iter().any(|c| c.to_string_lossy().contains(hint)) {
-                continue;
-            }
-        }
-        if process.kill() {
-            killed += 1;
-        }
+/// 判断进程是不是随包 mpv。
+///
+/// ⚠️ 不能用命令行匹配：这台机器上 sysinfo 的 process.cmd() 全部返回空（Windows
+/// 屏蔽了 PEB 命令行读取，实测 251 个进程全空），按 cmdline 判「含 zex-mpv」永远
+/// 不命中 → 杀进程/数进程全部静默失效，退出时 mpv 没等退完就 app.exit（闪屏根因）。
+/// 改用 exe() 路径（Toolhelp32 提供，实测正常）：随包播放器无论开发树、target
+/// debug 还是安装版，路径都以 resources/mpv/mpv.exe 结尾；用户自己的 mpv 不会误伤
+fn is_zex_mpv(process: &sysinfo::Process) -> bool {
+    if !process.name().to_string_lossy().to_ascii_lowercase().eq_ignore_ascii_case("mpv.exe") {
+        return false;
     }
-    killed
+    let Some(exe) = process.exe() else { return false };
+    let path = exe
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .replace('\\', "/");
+    // 去掉可能存在的 \\?\ 长路径前缀
+    path.trim_start_matches("//?/")
+        .ends_with("resources/mpv/mpv.exe")
 }
 
-/// 强杀命令行含 zex-mpv（随包播放器管道名）的 mpv 进程 —— 托盘「退出」的兜底，
-/// 覆盖活跃播放会话 / 空闲预热 / 崩溃孤儿。注意与 kill_warm_processes 的区别：
-/// 那个只杀 warm 预热（不碰正在播放的会话），这里是真正的全面销毁
+/// 强杀所有随包 mpv 进程 —— 托盘「退出」的兜底，覆盖活跃播放会话 / 空闲预热 /
+/// 崩溃孤儿 / 冷启动窗口期（会话还没建立）的实例
 pub(crate) fn kill_all_zex_mpv() -> usize {
     let mut sys = System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
     let mut killed = 0;
     for (_, process) in sys.processes() {
-        let is_mpv = process.name().to_string_lossy().to_ascii_lowercase() == "mpv.exe";
-        let cmd = process.cmd();
-        if !is_mpv || !cmd.iter().any(|c| c.to_string_lossy().contains("zex-mpv")) {
+        if !is_zex_mpv(process) {
             continue;
         }
         if process.kill() {
@@ -670,17 +666,15 @@ pub(crate) fn kill_all_zex_mpv() -> usize {
     killed
 }
 
-/// 统计命令行含 zex-mpv 的 mpv 进程数（退出时判断是否都退干净了）
-fn mpv_zex_processes() -> usize {
+/// 进程是否还活着。按 PID 判活（不依赖命令行），退出清理的等待循环用
+fn pid_alive(pid: u32) -> bool {
     let mut sys = System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-    sys.processes()
-        .values()
-        .filter(|p| {
-            p.name().to_string_lossy().to_ascii_lowercase() == "mpv.exe"
-                && p.cmd().iter().any(|c| c.to_string_lossy().contains("zex-mpv"))
-        })
-        .count()
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(pid)]),
+        true,
+        sysinfo::ProcessRefreshKind::new(),
+    );
+    sys.process(sysinfo::Pid::from_u32(pid)).is_some()
 }
 
 /// 空闲预热实例状态机。状态判断/回写在锁内完成（快速），拉起进程在锁外（慢操作）
@@ -693,8 +687,9 @@ pub struct WarmSlot {
 enum WarmState {
     /// 没有空闲实例
     Empty,
-    /// 有一个空闲 mpv（管道名）。**约定：只有完全空闲的实例才处于 Idle**
-    Idle(String),
+    /// 有一个空闲 mpv（管道名 + 进程 PID）。**约定：只有完全空闲的实例才处于 Idle**。
+    /// PID 供退出清理等待/兜底（cmdline 匹配不可靠，见 is_zex_mpv 注释）
+    Idle { pipe: String, pid: u32 },
     /// 已被点播放领走 → 是活跃会话，归 state.mpv 管
     Consumed,
 }
@@ -719,13 +714,13 @@ impl WarmSlot {
     /// 保持 Idle 不消费 —— 点播放时由 acquire 领走。
     /// 锁只做快速判断与状态回写；拉进程在锁外（WARM_SPAWN_LOCK 串行），
     /// 退出补拉不再阻塞并发的 acquire（点播放）
-    pub fn ensure(&self, app: &AppHandle, data_dir: &PathBuf) -> Option<String> {
+    pub fn ensure(&self, app: &AppHandle, data_dir: &PathBuf) -> Option<(String, u32)> {
         // 快速路径：已有 Idle 且存活 → 直接用（短探测，不把秒级等待带进锁里）
         {
             let mut state = self.state.lock();
-            if let WarmState::Idle(pipe) = &*state {
+            if let WarmState::Idle { pipe, pid } = &*state {
                 if quick_probe(pipe, &self.shutdown) {
-                    return Some(pipe.clone());
+                    return Some((pipe.clone(), *pid));
                 }
                 *state = WarmState::Empty;
             }
@@ -737,9 +732,9 @@ impl WarmSlot {
         let _guard = WARM_SPAWN_LOCK.lock();
         {
             let mut state = self.state.lock();
-            if let WarmState::Idle(pipe) = &*state {
+            if let WarmState::Idle { pipe, pid } = &*state {
                 if quick_probe(pipe, &self.shutdown) {
-                    return Some(pipe.clone());
+                    return Some((pipe.clone(), *pid));
                 }
                 *state = WarmState::Empty;
             }
@@ -747,27 +742,27 @@ impl WarmSlot {
                 return None;
             }
         }
-        let pipe = spawn_warm_mpv(app, data_dir)?;
+        let (pipe, pid) = spawn_warm_mpv(app, data_dir)?;
         if probe_warm_pipe(&pipe, &self.shutdown).is_none() {
             // 拉起的实例迟迟没就绪：杀掉不留孤儿 + 状态复位，让下次可重拉
             quit_pipe(&pipe);
             *self.state.lock() = WarmState::Empty;
             return None;
         }
-        *self.state.lock() = WarmState::Idle(pipe.clone());
-        Some(pipe)
+        *self.state.lock() = WarmState::Idle { pipe: pipe.clone(), pid };
+        Some((pipe, pid))
     }
 
     /// 点播放领取空闲实例（转 Consumed）。拿不到（mpv 缺失 / 预热失败 / 已被占用）
     /// 返回 None，调用方落冷启动。
-    pub fn acquire(&self, app: &AppHandle, data_dir: &PathBuf) -> Option<String> {
+    pub fn acquire(&self, app: &AppHandle, data_dir: &PathBuf) -> Option<(String, u32)> {
         // 快速路径：已有 Idle 且存活 → 领取（短探测，锁内毫秒级）
         {
             let mut state = self.state.lock();
             match &*state {
-                WarmState::Idle(pipe) => {
+                WarmState::Idle { pipe, pid } => {
                     if quick_probe(pipe, &self.shutdown) {
-                        let p = pipe.clone();
+                        let p = (pipe.clone(), *pid);
                         *state = WarmState::Consumed;
                         return Some(p);
                     }
@@ -786,9 +781,9 @@ impl WarmSlot {
         {
             let mut state = self.state.lock();
             match &*state {
-                WarmState::Idle(pipe) => {
+                WarmState::Idle { pipe, pid } => {
                     if quick_probe(pipe, &self.shutdown) {
-                        let p = pipe.clone();
+                        let p = (pipe.clone(), *pid);
                         *state = WarmState::Consumed;
                         return Some(p);
                     }
@@ -801,14 +796,14 @@ impl WarmSlot {
                 return None;
             }
         }
-        let pipe = spawn_warm_mpv(app, data_dir)?;
+        let (pipe, pid) = spawn_warm_mpv(app, data_dir)?;
         if probe_warm_pipe(&pipe, &self.shutdown).is_none() {
             quit_pipe(&pipe);
             *self.state.lock() = WarmState::Empty;
             return None;
         }
         *self.state.lock() = WarmState::Consumed;
-        Some(pipe)
+        Some((pipe, pid))
     }
 
     /// 领取后连接失败等异常：把 Consumed 复位为 Empty，允许下次重新拉起
@@ -831,7 +826,7 @@ impl WarmSlot {
         let pipe = {
             let mut state = self.state.lock();
             let pipe = match &*state {
-                WarmState::Idle(p) => Some(p.clone()),
+                WarmState::Idle { pipe, .. } => Some(pipe.clone()),
                 _ => None,
             };
             *state = WarmState::Empty;
@@ -842,14 +837,19 @@ impl WarmSlot {
         }
     }
 
-    /// ZEX 退出：收掉所有空闲预热实例（含孤儿）。活跃播放会话（命令行不含 warm）
-    /// 不动 —— 保持现有"关 ZEX 后播放器继续"的行为
-    pub fn quit_idle(&self) {
-        // 同 deactivate：管道名取出来再放锁，等待不占锁
+    /// 应用退出：置 shutdown（禁止后续补拉）+ 给空闲预热发 quit，返回预热实例的
+    /// PID（shutdown_all 据此等待它真正退出）。只处理 Idle 空闲实例；活跃会话由
+    /// shutdown_all 直接发 quit 并等自己的 PID
+    pub(crate) fn quit_for_exit(&self) -> Vec<u32> {
+        self.shutdown.store(true, Ordering::Relaxed);
+        let mut pids = Vec::new();
         let pipe = {
             let mut state = self.state.lock();
             let pipe = match &*state {
-                WarmState::Idle(p) => Some(p.clone()),
+                WarmState::Idle { pipe, pid } => {
+                    pids.push(*pid);
+                    Some(pipe.clone())
+                }
                 _ => None,
             };
             *state = WarmState::Empty;
@@ -858,9 +858,15 @@ impl WarmSlot {
         if let Some(pipe) = pipe {
             quit_pipe(&pipe);
         }
-        // 兜底：枚举强杀所有 warm 预热进程 —— 覆盖 probe 超时遗留的孤儿、状态已置
-        // Empty 但进程还活着的实例（只靠 Idle 状态收不干净，这就是用户看到的残留）
-        kill_warm_processes(None);
+        pids
+    }
+
+    /// ZEX 退出兜底（RunEvent::Exit，此时 shutdown_all 已把会话/预热都清理过）：
+    /// 再收一遍所有随包 mpv —— 覆盖 probe 超时遗留的孤儿、状态已置 Empty 但进程
+    /// 还活着的实例（只靠 Idle 状态收不干净，这就是用户看到的残留）
+    pub fn quit_idle(&self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        kill_all_zex_mpv();
     }
 }
 
@@ -1689,8 +1695,10 @@ fn spawn_reader(
                             let _ = app.emit("mpv-closed", ());
                             // 提前补拉：mpv 还在退出的同时拉起新预热，比等 EOF 提前几百
                             // ms 到 1-2s，避开"退出后马上再点"撞上补拉窗口。EOF 分支仍会
-                            // ensure 兜底（幂等 + WARM_SPAWN_LOCK 串行，不会双拉）
-                            if !warm.shutdown() {
+                            // ensure 兜底（幂等 + WARM_SPAWN_LOCK 串行，不会双拉）。
+                            // 应用退出中（exiting / warm shutdown）不补拉，免得又拉起来
+                            // 被退出清理强杀
+                            if !warm.shutdown() && !app.state::<AppState>().exiting.load(Ordering::Relaxed) {
                                 let warm = warm.clone();
                                 let app = app.clone();
                                 let data_dir = data_dir.clone();
@@ -1787,8 +1795,8 @@ fn spawn_reader(
             let _ = app.emit("mpv-closed", ());
         }
         // 播放器已退出：后台补拉一个空闲预热实例，下一次播放仍是热启动。
-        // 应用正在退出（shutdown 置位）时不补拉
-        if !warm.shutdown() {
+        // 应用正在退出（exiting / warm shutdown 置位）时不补拉
+        if !warm.shutdown() && !app.state::<AppState>().exiting.load(Ordering::Relaxed) {
             let warm = warm.clone();
             let app = app.clone();
             let data_dir = data_dir.clone();
@@ -1804,7 +1812,14 @@ fn spawn_reader(
 /// show 出来的 ZEX 被 mpv 盖住、用户无感，但窗口可见后 WebView2 开始合成恢复后的
 /// 界面；等 mpv 销毁（几十 ms）ZEX 无缝接上 —— 桌面和任务栏全程被盖，不再闪现。
 /// set_focus 刻意不在这里：mpv 还在前台时抢不过，抢反而会让 Windows 闪烁任务栏图标。
+///
+/// 应用正在退出（托盘「退出」的清理阶段）时不唤回：此时唤回会把窗口弹出来又立刻
+/// 销毁，屏幕上闪现一帧 ZEX 再消失 —— 正好抵消 tray_menu_action「先隐藏再清理」
+/// 的设计，是"用过播放器后退出的闪屏"的组成部分
 fn restore_main_window(app: &AppHandle) {
+    if app.state::<AppState>().exiting.load(Ordering::Relaxed) {
+        return;
+    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
@@ -2025,7 +2040,7 @@ pub fn play_episode_mpv(
     // ── 预热路径：复用常驻空闲 mpv，免去进程/库/皮肤脚本冷启动 ──
     // 拿到实例就 loadlist，窗口在文件加载时直接以全屏创建。连接失败（实例刚被
     // 抢占/消失）则复位预热槽位、落冷启动，行为与旧版一致
-    if let Some(warm_pipe) = state.warm.acquire(&app, &state.data_dir) {
+    if let Some((warm_pipe, warm_pid)) = state.warm.acquire(&app, &state.data_dir) {
         // 用掉预热实例后不再补拉：会话结束时 reader 的 end-file/EOF 分支会补一个，
         // 避免「活跃播放 + 空闲预热」并存两个 mpv。音乐↔影视切换走 running 分支复用同一进程
         let mut started = false;
@@ -2060,6 +2075,7 @@ pub fn play_episode_mpv(
                 };
                 *state.mpv.lock() = Some(Session {
                     pipe: warm_pipe.clone(),
+                    pid: warm_pid,
                     writer: Some(writer),
                     episode_id: ep.id.clone(),
                     label: label_of(&ep),
@@ -2143,7 +2159,8 @@ pub fn play_episode_mpv(
     if let Some(dir) = mpv_exe.parent() {
         cmd.current_dir(dir);
     }
-    cmd.spawn()
+    let child = cmd
+        .spawn()
         .map_err(|e| AppError::Custom(format!("无法启动 mpv: {}", e)))?;
 
     // 不在此处补拉预热：会话结束时 reader 的 end-file/EOF 分支统一补拉，
@@ -2155,6 +2172,7 @@ pub fn play_episode_mpv(
     };
     *state.mpv.lock() = Some(Session {
         pipe: pipe.clone(),
+        pid: child.id(),
         writer: None,
         episode_id: ep.id.clone(),
         label: label_of(&ep),
@@ -2208,6 +2226,9 @@ pub fn mpv_available(app: AppHandle) -> bool {
 /// 与「收进托盘」不同——那是窗口隐藏、进程存活、播放器继续；这里是真正退出，
 /// 必须把播放器一并收掉，否则用户退出 ZEX 后 mpv 还在后台播
 pub fn shutdown_all(state: &AppState) {
+    // 0) 置退出标志：reader 的 end-file/EOF 分支据此不再唤回主窗口（否则退出中途
+    //    窗口被弹出又销毁 = 闪屏）、不再补拉预热（避免拉起来又被强杀）
+    state.exiting.store(true, Ordering::Relaxed);
     // 1) 活跃会话发 quit（优雅结算：reader 的 end-file 分支会 flush 进度/会话）。
     //    走 send_to_session（全新连接、不持 mpv 锁）—— 旧实现持锁直接写 s.writer，
     //    播放器暂停时那条连接写会无限阻塞，把退出流程卡死
@@ -2225,14 +2246,22 @@ pub fn shutdown_all(state: &AppState) {
             let _ = send(&mut f, json!(["quit"]));
         }
     }
-    // 3) 防 reader 在 quit 后补拉新预热实例
-    state.warm.set_shutdown();
-    // 4) 轮询等 mpv 进程消失（上限 1.5s）：期间 reader 完成 quit 结算。
+    // 3) 空闲预热优雅退出（置 shutdown + 发 quit），返回它的 PID 供等待
+    let mut wait_pids = state.warm.quit_for_exit();
+    // 4) 活跃会话的 PID 也加入等待集合
+    if let Some(s) = state.mpv.lock().as_ref() {
+        wait_pids.push(s.pid);
+    }
+    // 5) 轮询等这些 PID 真正消失（上限 1.5s）：期间 reader 完成 quit 结算。
     //    注意 quit 的结算发生在 mpv 进程退出前（end-file reason=quit 已 flush），
-    //    所以等 mpv 消失后进度/会话已经落库
+    //    所以等 mpv 消失后进度/会话已经落库。
+    //    按 PID 判活（pid_alive）—— 不能数进程，这台机器上 sysinfo 读不到命令行，
+    //    按 cmdline 匹配永远数不到（旧实现因此不等 mpv 退完就 app.exit，mpv 的全屏
+    //    d3d11 窗口销毁与 ZEX 自身销毁撞在同一瞬间 = "用过播放器后退出的闪屏"）
     let start = Instant::now();
     loop {
-        if mpv_zex_processes() == 0 {
+        let alive = wait_pids.iter().any(|&pid| pid_alive(pid));
+        if !alive {
             break;
         }
         if start.elapsed() > Duration::from_millis(1500) {
@@ -2240,7 +2269,8 @@ pub fn shutdown_all(state: &AppState) {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    // 5) 残留强杀兜底（1.5s 内没退的卡死实例 / 孤儿），再等 reader 收尾
+    // 6) 残留强杀兜底（1.5s 内没退的卡死实例 / 冷启动窗口期未建会话的实例 / 孤儿），
+    //    按 exe 路径匹配（is_zex_mpv），再等 reader 收尾
     let killed = kill_all_zex_mpv();
     if killed > 0 {
         log::info!("ZEX 退出清理：强杀 {} 个 mpv 进程", killed);
@@ -2369,7 +2399,7 @@ pub fn play_music(
     }
 
     // ── 预热路径：复用常驻空闲 mpv ──
-    if let Some(warm_pipe) = state.warm.acquire(&app, &state.data_dir) {
+    if let Some((warm_pipe, warm_pid)) = state.warm.acquire(&app, &state.data_dir) {
         // 用掉预热实例后不再补拉：会话结束时 reader 的 end-file/EOF 分支会补一个，
         // 避免「活跃播放 + 空闲预热」并存两个 mpv。音乐↔影视切换走 running 分支复用同一进程
         let mut started = false;
@@ -2391,6 +2421,7 @@ pub fn play_music(
                 };
                 *state.mpv.lock() = Some(Session {
                     pipe: warm_pipe.clone(),
+                    pid: warm_pid,
                     writer: Some(writer),
                     episode_id: track_id.clone(),
                     label: queue.get(start_idx).map(|q| q.title.clone()).unwrap_or_default(),
@@ -2446,7 +2477,8 @@ pub fn play_music(
     if let Some(dir) = mpv_exe.parent() {
         cmd.current_dir(dir);
     }
-    cmd.spawn()
+    let child = cmd
+        .spawn()
         .map_err(|e| AppError::Custom(format!("无法启动 mpv: {}", e)))?;
 
     // 不在此处补拉预热：会话结束时 reader 的 end-file/EOF 分支统一补拉，
@@ -2464,6 +2496,7 @@ pub fn play_music(
     };
     *state.mpv.lock() = Some(Session {
         pipe: pipe.clone(),
+        pid: child.id(),
         writer: None,
         episode_id: track_id.clone(),
         label: queue.get(start_idx).map(|q| q.title.clone()).unwrap_or_default(),

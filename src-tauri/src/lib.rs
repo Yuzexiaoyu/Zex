@@ -81,6 +81,10 @@ pub struct AppState {
     /// 前端「取消移动」置位；复制循环每复制完一个文件检查一次，置位即中止
     /// （走失败清理路径：删除目标残留副本，源目录/文件原样保留）
     pub(crate) move_cancel: Arc<AtomicBool>,
+    /// 应用正在退出标志：托盘「退出」的清理阶段置位（shutdown_all 第一步）。
+    /// reader 的 end-file/EOF 分支据此不再唤回主窗口、不再补拉预热 —— 否则退出
+    /// 中途窗口被弹出又销毁（闪屏）、预热被拉起来又被强杀
+    pub(crate) exiting: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -7161,6 +7165,12 @@ fn show_main_window_cmd(app: tauri::AppHandle) {
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
+    // 应用正在退出（托盘「退出」的清理阶段）：拒绝唤回。主窗口收进托盘后 WebView2
+    // 仍活着，reader 的 mpv-closed 事件照样派发、前端照样调 show_main_window_cmd ——
+    // 此时把窗口 show 出来会被立刻销毁，屏幕上闪现一帧再消失
+    if app.state::<AppState>().exiting.load(Ordering::Relaxed) {
+        return;
+    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
@@ -7284,6 +7294,7 @@ pub fn run() {
         ps_guide_enabled: Arc::new(AtomicBool::new(false)),
         metadata_fetching: Arc::new(AtomicBool::new(false)),
         move_cancel: Arc::new(AtomicBool::new(false)),
+        exiting: Arc::new(AtomicBool::new(false)),
     };
 
     let covers_dir = data_dir.join("covers");

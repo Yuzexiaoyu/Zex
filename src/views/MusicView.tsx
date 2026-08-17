@@ -17,17 +17,19 @@ import type { Track } from '../types';
 import { coverSrc } from '../utils/media';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useGamepadGroup, useFocusIndex, useRightStickScroll } from '../gamepad';
+import { useT } from '../i18n';
 
 type SortKey = 'recent' | 'title' | 'artist' | 'album' | 'custom';
 // 全部 / 收藏 / 歌单（playlist:<id>）——歌单和收藏一个道理，都是筛选入口
 type FilterKey = 'all' | 'favorite' | string;
 
+// label/hint 存 i18n key，SortMenu 内部经 t() 渲染
 const SORTS: SortOption[] = [
-  { key: 'recent', label: '最近添加', hint: '新导入的排前面', icon: CalendarPlus },
-  { key: 'title', label: '歌名', hint: '按歌名排序', icon: ArrowDownAZ },
-  { key: 'artist', label: '歌手', hint: '按歌手排序', icon: Music2 },
-  { key: 'album', label: '专辑', hint: '按专辑排序', icon: ListMusic },
-  { key: 'custom', label: '自定义', hint: '拖动排序', icon: GripVertical },
+  { key: 'recent', label: 'music.sortRecent', hint: 'music.sortRecentHint', icon: CalendarPlus },
+  { key: 'title', label: 'music.sortTitle', hint: 'music.sortTitleHint', icon: ArrowDownAZ },
+  { key: 'artist', label: 'music.sortArtist', hint: 'music.sortArtistHint', icon: Music2 },
+  { key: 'album', label: 'music.sortAlbum', hint: 'music.sortAlbumHint', icon: ListMusic },
+  { key: 'custom', label: 'music.sortCustom', hint: 'music.sortCustomHint', icon: GripVertical },
 ];
 
 // 曲目行高（px）：封面 44 + py 10×2 + 行间距 2。虚拟滚动的 estimateSize 和
@@ -43,6 +45,7 @@ function fmtTime(seconds: number): string {
 }
 
 export default function MusicView() {
+  const t = useT();
   // 逐字段订阅：曲目列表最长，不能跟着 nowPlaying.positionMs 每秒重画整表
   const tracks = useAppStore((s) => s.tracks);
   const playlists = useAppStore((s) => s.playlists);
@@ -368,23 +371,24 @@ export default function MusicView() {
   useRightStickScroll(listRef);
 
   // 播放：以当前排序/筛选列表为队列，从这首开始（mpv video=no，ZEX 留在前台）
-  const handlePlay = (t: Track) => {
+  // 参数名用 track：组件里已有翻译函数 t，避免遮蔽
+  const handlePlay = (track: Track) => {
     // playMusic 失败（播放器没响应）时后端不会切歌 —— 进度条保持旧曲，提示用户重试，
     // 而不是界面切到新歌、进度却永远不动（trackId 对不上被进度事件忽略）
-    playTrack(t, displayList).catch((err) => {
-      void message(`播放失败：${String(err)}`, { title: '播放', kind: 'error' });
+    playTrack(track, displayList).catch((err) => {
+      void message(t('music.playFailed', { msg: String(err) }), { title: t('music.playTitle'), kind: 'error' });
     });
   };
 
-  const handleDelete = async (t: Track) => {
-    const ok = await ask(`确定从音乐库移除《${t.title}》吗？（不会删除磁盘文件）`, {
-      title: '移除曲目', kind: 'warning',
+  const handleDelete = async (track: Track) => {
+    const ok = await ask(t('music.removeConfirm', { title: track.title }), {
+      title: t('music.removeTrackTitle'), kind: 'warning',
     });
     if (!ok) return;
     try {
-      await deleteTrack(t.id);
+      await deleteTrack(track.id);
     } catch (err) {
-      void message(`移除失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('music.removeFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
     }
   };
 
@@ -413,13 +417,13 @@ export default function MusicView() {
   };
   const handleBulkDelete = async () => {
     if (selected.size === 0) return;
-    const ok = await ask(`确定从音乐库移除选中的 ${selected.size} 首曲目吗？（不会删除磁盘文件）`, {
-      title: '移除曲目', kind: 'warning',
+    const ok = await ask(t('music.removeSelectedConfirm', { n: selected.size }), {
+      title: t('music.removeTrackTitle'), kind: 'warning',
     });
     if (!ok) return;
     for (const id of selected) {
       try { await deleteTrack(id); } catch (err) {
-        void message(`移除失败：${String(err)}`, { title: '错误', kind: 'error' });
+        void message(t('music.removeFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
         break;
       }
     }
@@ -437,7 +441,7 @@ export default function MusicView() {
       await deletePlaylist(id);
       if (filter === `playlist:${id}`) setFilter('all');
     } catch (err) {
-      void message(`删除失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('music.deletePlaylistFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
     }
   };
 
@@ -450,7 +454,7 @@ export default function MusicView() {
       <div className="shrink-0 px-6 py-4 flex items-center gap-3 flex-wrap">
         <button className="btn btn-accent gap-2 text-sm" onClick={() => setShowAddModal(true)}>
           <Plus size={15} />
-          添加音乐
+          {t('music.addMusic')}
         </button>
 
         <div className="relative flex-1 min-w-[180px] max-w-sm">
@@ -458,15 +462,15 @@ export default function MusicView() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索歌名、歌手或专辑"
+            placeholder={t('music.searchPlaceholder')}
             className="input search-input text-sm"
           />
         </div>
 
         <div className="flex items-center gap-1.5">
           {([
-            { key: 'all' as const, label: '全部' },
-            { key: 'favorite' as const, label: '收藏' },
+            { key: 'all' as const, label: 'common.all' },
+            { key: 'favorite' as const, label: 'music.favorite' },
             // 歌单和收藏一个道理：每个歌单一个 chip，点选即筛选该歌单曲目；右键 chip 可删歌单
             ...playlists.map((p) => ({ key: `playlist:${p.id}` as const, label: p.name, playlistId: p.id })),
           ]).map((f) => (
@@ -482,9 +486,9 @@ export default function MusicView() {
                 }
               }}
               className={clsx('chip max-w-[9rem] truncate', filter === f.key && 'active')}
-              title={f.label}
+              title={'playlistId' in f ? f.label : t(f.label)}
             >
-              {f.label}
+              {'playlistId' in f ? f.label : t(f.label)}
             </button>
           ))}
         </div>
@@ -493,16 +497,16 @@ export default function MusicView() {
           <div className="ml-auto flex items-center gap-2.5">
             <button onClick={toggleSelectAll} className={clsx('chip', allSelected && 'active')}>
               {allSelected ? <CheckSquare size={13} /> : <Square size={13} />}
-              全选
+              {t('music.selectAll')}
             </button>
-            <span className="text-xs text-text-tertiary tabular-nums">已选 {selected.size} 首</span>
+            <span className="text-xs text-text-tertiary tabular-nums">{t('music.selectedCount', { n: selected.size })}</span>
             <button onClick={exitMultiSelect} className="chip">
-              取消多选
+              {t('music.exitMultiSelect')}
             </button>
           </div>
         ) : (
           <div className="ml-auto flex items-center gap-2.5">
-            <span className="text-xs text-text-tertiary tabular-nums">{tracks.length} 首曲目</span>
+            <span className="text-xs text-text-tertiary tabular-nums">{t('music.trackCount', { n: tracks.length })}</span>
             <SortMenu
               ref={sortRef}
               value={sort}
@@ -533,30 +537,30 @@ export default function MusicView() {
               <div className="absolute -inset-4 rounded-full bg-[#7c3aed]/5 blur-2xl animate-pulse" />
             </div>
             <div className="text-center">
-              <p className="text-xl font-semibold text-text-primary/70 mb-2">音乐库还是空的</p>
-              <p className="text-sm text-text-tertiary">扫描一个音乐文件夹，或手动选择音频文件，标签会自动解析</p>
+              <p className="text-xl font-semibold text-text-primary/70 mb-2">{t('music.emptyTitle')}</p>
+              <p className="text-sm text-text-tertiary">{t('music.emptyDesc')}</p>
             </div>
             <button className="btn btn-accent gap-2 px-6 py-3 text-sm" onClick={() => setShowAddModal(true)}>
               <Plus size={16} />
-              添加音乐
+              {t('music.addMusic')}
             </button>
           </div>
         ) : displayList.length === 0 ? (
           <div className="py-20 flex flex-col items-center gap-3">
             <Search size={32} className="text-text-tertiary" />
-            <p className="text-sm text-text-secondary">没有匹配的曲目</p>
+            <p className="text-sm text-text-secondary">{t('music.noMatch')}</p>
           </div>
         ) : (
           <div className="relative w-full" style={{ height: rowVirtualizer.getTotalSize() }}>
             {rowVirtualizer.getVirtualItems().map((vRow, vIdx) => {
-              const t = displayList[vRow.index];
+              const trk = displayList[vRow.index];
               const idx = vRow.index;
-              if (!t) return null;
+              if (!trk) return null;
               return (
               // 外层只管虚拟定位：card-enter 入场动画会动 transform，
               // 与定位 transform 写在同一元素上会互相覆盖 → 行飞到错位置
               <div
-                key={t.id}
+                key={trk.id}
                 className="absolute left-0 right-0 top-0"
                 style={{ height: ROW_H - 2, transform: `translateY(${vRow.start}px)` }}
               >
@@ -568,10 +572,10 @@ export default function MusicView() {
                   // 只在挂载后的入场窗口内加动画，之后滚动挂载的行不带动画
                   !everDragged && introWindow && 'music-row-enter',
                   dragEnabled && 'touch-none select-none', // 拖拽时防原生拖拽/选字；光标保持 pointer（点击=播放）
-                  drag?.active && drag.id === t.id && 'cursor-grabbing', // 正在拖动的行显示抓握
+                  drag?.active && drag.id === trk.id && 'cursor-grabbing', // 正在拖动的行显示抓握
                   idx === listFocused && 'gamepad-focus',
-                  drag?.active && drag.id === t.id && 'drag-src',
-                  t.id === playingTrackId && 'music-row-playing', // 当前播放行：底色 + 左侧竖条
+                  drag?.active && drag.id === trk.id && 'drag-src',
+                  trk.id === playingTrackId && 'music-row-playing', // 当前播放行：底色 + 左侧竖条
                 )}
                 style={{
                   // 错位延迟按行在首屏中的序号算，不用全局 idx —— 否则从中间挂载的行
@@ -579,21 +583,21 @@ export default function MusicView() {
                   animationDelay: !everDragged && introWindow ? `${Math.min(vIdx * 40, 440)}ms` : undefined,
                 }}
                 onClick={() => {
-                  if (multiSelect) toggleSelect(t.id);
-                  else handlePlay(t);
+                  if (multiSelect) toggleSelect(trk.id);
+                  else handlePlay(trk);
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   if (multiSelect) setBulkMenu({ x: e.clientX, y: e.clientY });
-                  else setMenu({ t, x: e.clientX, y: e.clientY });
+                  else setMenu({ t: trk, x: e.clientX, y: e.clientY });
                 }}
-                onPointerDown={dragEnabled ? (e) => handleRowPointerDown(e, t) : undefined}
+                onPointerDown={dragEnabled ? (e) => handleRowPointerDown(e, trk) : undefined}
               >
                 {/* 多选复选框 */}
                 {multiSelect && (
                   <span className="w-5 shrink-0 flex items-center justify-center">
-                    {selected.has(t.id)
+                    {selected.has(trk.id)
                       ? <CheckSquare size={16} className="text-[#00d4ff]" />
                       : <Square size={16} className="text-text-tertiary" />}
                   </span>
@@ -601,14 +605,14 @@ export default function MusicView() {
 
                 {/* 封面 / 默认图标 */}
                 <div className="relative w-11 h-11 rounded-lg overflow-hidden shrink-0 bg-bg-surface border border-border-glass flex items-center justify-center">
-                  {t.cover_path ? (
-                    <img src={coverSrc(t.cover_path, t.updated_at)} alt="" loading="lazy" className="w-full h-full object-cover" draggable={false} />
+                  {trk.cover_path ? (
+                    <img src={coverSrc(trk.cover_path, trk.updated_at)} alt="" loading="lazy" className="w-full h-full object-cover" draggable={false} />
                   ) : (
                     <Music2 size={20} className="text-text-tertiary" />
                   )}
                   {/* 正在播放：封面上盖三根跳动的均衡器竖条。暂停时条不动（animation-play-state），
                       一眼能分清「这首在放」和「这首停在这儿」 */}
-                  {t.id === playingTrackId && (
+                  {trk.id === playingTrackId && (
                     <span className={clsx('eq-badge', !musicPlaying && 'paused')} aria-hidden>
                       <i /><i /><i />
                     </span>
@@ -619,36 +623,36 @@ export default function MusicView() {
                 <div className="flex-1 min-w-0">
                   <p className={clsx(
                     'truncate text-base font-medium',
-                    t.id === playingTrackId ? 'text-accent' : 'text-text-primary',
-                  )}>{t.title}</p>
+                    trk.id === playingTrackId ? 'text-accent' : 'text-text-primary',
+                  )}>{trk.title}</p>
                   <p className="truncate text-sm text-text-secondary">
-                    {(t.artist || '未知歌手')}
-                    {t.album_artist && t.album_artist !== t.artist ? ` · ${t.album_artist}` : ''}
+                    {(trk.artist || t('music.unknownArtist'))}
+                    {trk.album_artist && trk.album_artist !== trk.artist ? ` · ${trk.album_artist}` : ''}
                   </p>
                 </div>
 
                 {/* 专辑 */}
-                <span className="hidden md:block w-72 truncate text-xs text-text-secondary">{t.album || '未知专辑'}</span>
+                <span className="hidden md:block w-72 truncate text-xs text-text-secondary">{trk.album || t('music.unknownAlbum')}</span>
 
                 {/* 比特率 */}
                 <span className="hidden xl:block w-20 shrink-0 text-right text-[11px] text-text-tertiary tabular-nums">
-                  {t.bitrate > 0 ? `${t.bitrate} kbps` : ''}
+                  {trk.bitrate > 0 ? `${trk.bitrate} kbps` : ''}
                 </span>
 
                 {/* 时长 */}
-                <span className="w-14 text-right text-xs text-text-tertiary tabular-nums">{fmtTime(t.duration_seconds)}</span>
+                <span className="w-14 text-right text-xs text-text-tertiary tabular-nums">{fmtTime(trk.duration_seconds)}</span>
 
                 {/* 操作：收藏 + 播放 */}
                 <div className="flex items-center gap-1 shrink-0">
                   <button
-                    onClick={(e) => { e.stopPropagation(); void toggleTrackFavorite(t.id); }}
+                    onClick={(e) => { e.stopPropagation(); void toggleTrackFavorite(trk.id); }}
                     className="w-8 h-8 rounded-lg flex items-center justify-center text-text-tertiary hover:text-yellow-400 hover:bg-bg-surface-active transition-all"
-                    title={t.favorite ? '取消收藏' : '收藏'}
+                    title={trk.favorite ? t('music.unfavorite') : t('music.favorite')}
                   >
                     <Star
                       size={15}
-                      className={t.favorite ? 'text-yellow-400' : ''}
-                      fill={t.favorite ? 'currentColor' : 'none'}
+                      className={trk.favorite ? 'text-yellow-400' : ''}
+                      fill={trk.favorite ? 'currentColor' : 'none'}
                     />
                   </button>
                 </div>
@@ -684,10 +688,10 @@ export default function MusicView() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="truncate text-base font-medium text-text-primary">{src.title}</p>
-                  <p className="truncate text-sm text-text-secondary">{src.artist || '未知歌手'}</p>
+                  <p className="truncate text-sm text-text-secondary">{src.artist || t('music.unknownArtist')}</p>
                 </div>
                 {/* 与原行同宽的专辑列，克隆视觉对齐完整一行 */}
-                <span className="hidden md:block w-72 shrink-0 truncate text-xs text-text-secondary">{src.album || '未知专辑'}</span>
+                <span className="hidden md:block w-72 shrink-0 truncate text-xs text-text-secondary">{src.album || t('music.unknownAlbum')}</span>
                 <span className="w-14 shrink-0 text-right text-xs text-text-tertiary tabular-nums">{fmtTime(src.duration_seconds)}</span>
               </div>
             );
@@ -727,7 +731,7 @@ export default function MusicView() {
           <div className="glass-card w-56 py-1.5 animate-scale-in">
             <button onClick={() => { setBulkMenu(null); setShowCreatePlaylist([...selected]); }} className="context-menu-item">
               <ListPlus size={14} className="text-text-secondary" />
-              新建歌单
+              {t('music.newPlaylist')}
             </button>
             {/* 没有歌单时没有可添加的目标，「添加到歌单」不显示（悬浮二级菜单往右展开） */}
             {playlists.length > 0 && (
@@ -736,7 +740,7 @@ export default function MusicView() {
             <div className="context-menu-divider" />
             <button onClick={() => void handleBulkDelete()} className="context-menu-item text-danger">
               <Trash2 size={14} />
-              删除选中 {selected.size} 首
+              {t('music.deleteSelected', { n: selected.size })}
             </button>
           </div>
         </div>,
@@ -766,7 +770,7 @@ export default function MusicView() {
           <div className="glass-card w-40 py-1.5 animate-scale-in">
             <button onClick={() => void handleDeletePlaylist(playlistMenu.id)} className="context-menu-item text-danger">
               <Trash2 size={14} />
-              删除歌单
+              {t('music.deletePlaylist')}
             </button>
           </div>
         </div>,

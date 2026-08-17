@@ -4,6 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { createSeries, createSeason, createEpisode, scanVideoFolder } from '../api';
 import type { ScannedEpisode } from '../api';
 import { useModalGamepad } from '../gamepad';
+import { useT } from '../i18n';
 
 interface AddSeriesModalProps {
   onClose: () => void;
@@ -25,6 +26,7 @@ function guessTitleFromFile(filePath: string): string {
 const inputClass = 'w-full px-4 py-3 rounded-xl text-sm bg-bg-surface border border-border-glass text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-[#00d4ff]/50 focus:bg-[rgba(0,212,255,0.04)] transition-all';
 
 export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalProps) {
+  const t = useT();
   const [mode, setMode] = useState<AddMode>('folder');
   const [name, setName] = useState('');
   const [overview, setOverview] = useState('');
@@ -59,7 +61,7 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
           }
         } catch (err) {
           console.error('扫描文件夹失败:', err);
-          alert('扫描文件夹失败，请检查文件夹路径');
+          alert(t('series.scanFailedFolder'));
         } finally {
           setIsScanning(false);
         }
@@ -74,7 +76,7 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: '视频文件', extensions: VIDEO_EXTS }],
+        filters: [{ name: t('series.videoFilter'), extensions: VIDEO_EXTS }],
       });
       if (selected && typeof selected === 'string') {
         setFilePath(selected);
@@ -88,12 +90,12 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      alert('请输入影视名称');
+      alert(t('series.nameRequired'));
       return;
     }
 
     if (mode === 'movie' && !filePath) {
-      alert('请选择视频文件');
+      alert(t('series.pickFileRequired'));
       return;
     }
 
@@ -205,7 +207,7 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
       onClose();
     } catch (err) {
       console.error('添加影视失败:', err);
-      alert('添加失败，请重试');
+      alert(t('series.addFailedRetry'));
     } finally {
       setIsSubmitting(false);
     }
@@ -221,12 +223,12 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
             <div className="w-9 h-9 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.2)] flex items-center justify-center">
               <Film size={18} className="text-[#00d4ff]" />
             </div>
-            <h2 className="text-lg font-bold">添加影视</h2>
+            <h2 className="text-lg font-bold">{t('series.addSeries')}</h2>
           </div>
           <button
             onClick={onClose}
             className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-white hover:bg-bg-surface-active transition-all"
-            title="关闭"
+            title={t('common.close')}
           >
             <X size={18} />
           </button>
@@ -236,8 +238,8 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
           {/* 模式选择 */}
           <div className="flex gap-3">
             {([
-              { key: 'folder' as const, icon: Folder, label: '剧集文件夹' },
-              { key: 'movie' as const, icon: Clapperboard, label: '单个视频（电影）' },
+              { key: 'folder' as const, icon: Folder, label: 'series.folderMode' },
+              { key: 'movie' as const, icon: Clapperboard, label: 'series.movieMode' },
             ]).map(({ key, icon: Icon, label }) => (
               <button
                 key={key}
@@ -250,7 +252,7 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
                 }`}
               >
                 <Icon size={16} />
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
@@ -260,14 +262,14 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
             {mode === 'folder' && (
               <div>
                 <label className="block text-xs text-text-secondary mb-1.5">
-                  选择视频文件夹 *
+                  {t('series.folderLabel')}
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={folderPath}
                     readOnly
-                    placeholder="点击右侧按钮选择文件夹"
+                    placeholder={t('series.folderPlaceholder')}
                     className={inputClass}
                   />
                   <button
@@ -276,12 +278,12 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
                     disabled={isScanning}
                     className="flex-shrink-0 px-4 py-3 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.2)] hover:bg-[rgba(0,212,255,0.2)] flex items-center justify-center gap-2 text-sm text-[#00d4ff] transition-all disabled:opacity-50"
                   >
-                    {isScanning ? '扫描中...' : (<><Folder size={16} /> 选择</>)}
+                    {isScanning ? t('series.scanning') : (<><Folder size={16} /> {t('series.choose')}</>)}
                   </button>
                 </div>
                 {scannedEpisodes.length > 0 && (
                   <p className="mt-2 text-xs text-[#00d4ff]">
-                    ✓ 已扫描到 {scannedEpisodes.length} 个视频文件
+                    {t('series.scannedCount', { n: scannedEpisodes.length })}
                   </p>
                 )}
               </div>
@@ -291,14 +293,14 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
             {mode === 'movie' && (
               <div>
                 <label className="block text-xs text-text-secondary mb-1.5">
-                  选择视频文件 *
+                  {t('series.fileLabel')}
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={filePath}
                     readOnly
-                    placeholder="点击右侧按钮选择 mp4 / mkv 等视频文件"
+                    placeholder={t('series.filePlaceholder')}
                     className={inputClass}
                   />
                   <button
@@ -307,11 +309,11 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
                     className="flex-shrink-0 px-4 py-3 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.2)] hover:bg-[rgba(0,212,255,0.2)] flex items-center justify-center gap-2 text-sm text-[#00d4ff] transition-all"
                   >
                     <Clapperboard size={16} />
-                    选择
+                    {t('series.choose')}
                   </button>
                 </div>
                 <p className="mt-2 text-xs text-text-tertiary">
-                  添加后右键「获取元数据」会按电影库检索 TMDB，拿到海报、简介、时长与上映日期
+                  {t('series.movieModeHint')}
                 </p>
               </div>
             )}
@@ -319,13 +321,13 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
             {/* 基本信息 */}
             <div>
               <label className="block text-xs text-text-secondary mb-1.5">
-                {mode === 'movie' ? '电影名称 *' : '影视名称 *'}
+                {mode === 'movie' ? t('series.movieNameLabel') : t('series.tvNameLabel')}
               </label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={mode === 'movie' ? '例如：奥德赛' : '例如：我的解放日记'}
+                placeholder={mode === 'movie' ? t('series.movieNamePlaceholder') : t('series.tvNamePlaceholder')}
                 required
                 className={inputClass}
               />
@@ -333,12 +335,12 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
 
             <div>
               <label className="block text-xs text-text-secondary mb-1.5">
-                简介
+                {t('series.overview')}
               </label>
               <textarea
                 value={overview}
                 onChange={(e) => setOverview(e.target.value)}
-                placeholder="简单描述这部影视作品..."
+                placeholder={t('series.overviewPlaceholder')}
                 rows={4}
                 className={`${inputClass} resize-none`}
               />
@@ -352,14 +354,14 @@ export default function AddSeriesModal({ onClose, onSuccess }: AddSeriesModalPro
                 disabled={isSubmitting}
                 className="flex-1 btn btn-ghost py-3 px-6 text-sm"
               >
-                取消
+                {t('common.cancel')}
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting || (mode === 'folder' && !folderPath) || (mode === 'movie' && !filePath)}
                 className="flex-1 btn btn-accent py-3 px-6 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSubmitting ? '添加中...' : '添加影视'}
+                {isSubmitting ? t('series.adding') : t('series.addSeries')}
               </button>
             </div>
           </form>

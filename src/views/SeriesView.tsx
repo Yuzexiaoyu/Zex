@@ -20,23 +20,25 @@ import type { SeriesCard, TmdbSearchResult } from '../types';
 import { coverSrc, yearOf } from '../utils/media';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useFocusStore, useGamepadGroup, useGamepadFocus, useFocusIndex } from '../gamepad';
+import { useT } from '../i18n';
 
 type FilterKey = 'all' | 'unfinished' | 'finished' | 'favorite';
 type SortKey = 'custom' | 'recent' | 'title' | 'added' | 'rating';
 
+// label 存 i18n key，渲染时 t() 取词
 const FILTERS: Array<{ key: FilterKey; label: string }> = [
-  { key: 'all', label: '全部' },
-  { key: 'unfinished', label: '未看完' },
-  { key: 'finished', label: '已看完' },
-  { key: 'favorite', label: '收藏' },
+  { key: 'all', label: 'common.all' },
+  { key: 'unfinished', label: 'series.unfinished' },
+  { key: 'finished', label: 'series.finished' },
+  { key: 'favorite', label: 'series.favorite' },
 ];
 
 const SORTS: SortOption[] = [
-  { key: 'custom', label: '自定义', hint: '拖动海报调整顺序', icon: GripVertical },
-  { key: 'recent', label: '最近观看', hint: '看过的排前面', icon: History },
-  { key: 'added', label: '最近添加', hint: '新导入的排前面', icon: CalendarPlus },
-  { key: 'title', label: '名称', hint: '按剧名拼音升序', icon: ArrowDownAZ },
-  { key: 'rating', label: '评分', hint: 'TMDB 评分从高到低', icon: Star },
+  { key: 'custom', label: 'series.sortCustom', hint: 'series.sortCustomHint', icon: GripVertical },
+  { key: 'recent', label: 'series.sortRecent', hint: 'series.sortRecentHint', icon: History },
+  { key: 'added', label: 'series.sortAdded', hint: 'series.sortAddedHint', icon: CalendarPlus },
+  { key: 'title', label: 'series.sortTitle', hint: 'series.sortTitleHint', icon: ArrowDownAZ },
+  { key: 'rating', label: 'series.sortRating', hint: 'series.sortRatingHint', icon: Star },
 ];
 
 const GRID_GAP = 20;        // 与 .poster-grid 的 gap 保持一致
@@ -59,6 +61,7 @@ interface DragState {
 }
 
 export default function SeriesView() {
+  const t = useT();
   // 逐字段订阅：整墙海报不该跟着音乐进度等无关字段每秒重画
   const series = useAppStore((s) => s.series);
   const loadSeries = useAppStore((s) => s.loadSeries);
@@ -386,7 +389,7 @@ export default function SeriesView() {
       return;
     }
     if (!ep.local_path) {
-      void message('下一集还没有关联本地视频文件', { title: '无法播放', kind: 'warning' });
+      void message(t('series.epNoFile'), { title: t('series.cannotPlay'), kind: 'warning' });
       return;
     }
     try {
@@ -395,13 +398,13 @@ export default function SeriesView() {
       await api.playEpisode(ep.id);
       void loadSeries();
     } catch (err) {
-      void message(`播放失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('series.playFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
     }
   };
 
   const handleDelete = async (s: SeriesCard) => {
-    const ok = await ask(`确定删除《${s.title}》吗？该剧的季、集与观看记录会一并删除。`, {
-      title: '删除影视', kind: 'warning',
+    const ok = await ask(t('series.deleteConfirm', { title: s.title }), {
+      title: t('series.deleteSeries'), kind: 'warning',
     });
     if (!ok) return;
     try {
@@ -409,7 +412,7 @@ export default function SeriesView() {
       if (detailId === s.id) setDetailId(null);
       await loadSeries();
     } catch (err) {
-      void message(`删除失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('series.deleteFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
     }
   };
 
@@ -423,7 +426,7 @@ export default function SeriesView() {
       await api.autoFetchSeriesMetadata(s.id, tmdbId);
       await loadSeries();
     } catch (err) {
-      void message(`获取失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('series.fetchFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
     } finally {
       setFetchingTitle(null);
       setFetchPct(0);
@@ -436,7 +439,7 @@ export default function SeriesView() {
     try {
       const results = await api.searchTmdb(s.title, s.media_type);
       if (results.length === 0) {
-        void message(`TMDB 上没有找到「${s.title}」，可以改名后重试`, { title: '未找到', kind: 'warning' });
+        void message(t('series.tmdbNotFound', { title: s.title }), { title: t('series.tmdbNotFoundTitle'), kind: 'warning' });
         return;
       }
       if (results.length === 1) {
@@ -445,7 +448,7 @@ export default function SeriesView() {
       }
       setPicker({ s, results });
     } catch (err) {
-      void message(`搜索失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('series.searchFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
     }
   };
 
@@ -475,12 +478,12 @@ export default function SeriesView() {
             <div className="absolute -inset-4 rounded-full bg-[#7c3aed]/5 blur-2xl animate-pulse" />
           </div>
           <div className="text-center">
-            <p className="text-xl font-semibold text-text-primary/70 mb-2">影视库还是空的</p>
-            <p className="text-sm text-text-tertiary">选择一个含视频文件的文件夹，季和集会自动识别导入</p>
+            <p className="text-xl font-semibold text-text-primary/70 mb-2">{t('series.emptyTitle')}</p>
+            <p className="text-sm text-text-tertiary">{t('series.emptyDesc')}</p>
           </div>
           <button className="btn btn-accent gap-2 px-6 py-3 text-sm" onClick={() => setShowAddModal(true)}>
             <Plus size={16} />
-            添加影视
+            {t('series.addSeries')}
           </button>
         </div>
       ) : (
@@ -516,11 +519,11 @@ export default function SeriesView() {
                     </span>
                   )}
                   {(hero.media_type === 'movie'
-                    ? ['电影', yearOf(hero.first_air_date), hero.status, hero.genres,
-                       hero.watched_count > 0 ? '已看过' : '']
+                    ? [t('series.movie'), yearOf(hero.first_air_date), hero.status, hero.genres,
+                       hero.watched_count > 0 ? t('series.watched') : '']
                     : [yearOf(hero.first_air_date), hero.status, hero.genres,
-                       hero.season_count > 0 ? `${hero.season_count} 季` : '',
-                       hero.episode_count > 0 ? `已看 ${hero.watched_count}/${hero.episode_count}` : '']
+                       hero.season_count > 0 ? t('series.seasonCount', { n: hero.season_count }) : '',
+                       hero.episode_count > 0 ? t('series.watchedCount', { watched: hero.watched_count, total: hero.episode_count }) : '']
                   ).filter(Boolean).map((bit, i) => (
                     <span key={i} className="hero-meta-item">{bit}</span>
                   ))}
@@ -530,20 +533,20 @@ export default function SeriesView() {
                   <button className={clsx('btn btn-accent px-6 py-3 text-sm', heroPlayFocused && 'gamepad-focus')} onClick={() => void playNext(hero)}>
                     <Play size={16} fill="currentColor" />
                     {hero.media_type === 'movie' ? (
-                      hero.next_episode ? '播放电影' : '查看详情'
+                      hero.next_episode ? t('series.playMovie') : t('series.viewDetail')
                     ) : hero.next_episode ? (
                       <>
-                        {hero.watched_count > 0 ? '继续观看' : '开始观看'}
+                        {hero.watched_count > 0 ? t('series.continueWatching') : t('series.startWatching')}
                         <span className="opacity-70 tabular-nums">
                           S{String(hero.next_episode.season_number).padStart(2, '0')}
                           E{String(hero.next_episode.episode_number).padStart(2, '0')}
                         </span>
                       </>
-                    ) : '查看详情'}
+                    ) : t('series.viewDetail')}
                   </button>
                   <button className={clsx('btn btn-glass px-5 py-3 text-sm', heroDetailFocused && 'gamepad-focus')} onClick={() => setDetailId(hero.id)}>
                     <Film size={15} />
-                    剧集详情
+                    {t('series.episodeDetails')}
                   </button>
                 </div>
               </div>
@@ -555,7 +558,7 @@ export default function SeriesView() {
           <div className="sticky top-0 z-20 glass border-b border-border-glass px-6 py-3 flex items-center gap-3 flex-wrap">
             <button className={clsx('btn btn-accent gap-2 text-sm', toolbarFocused === 0 && 'gamepad-focus')} onClick={() => setShowAddModal(true)}>
               <Plus size={15} />
-              添加影视
+              {t('series.addSeries')}
             </button>
 
             <div className="relative flex-1 min-w-[180px] max-w-sm">
@@ -563,7 +566,7 @@ export default function SeriesView() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索剧名、原名或类型"
+                placeholder={t('series.searchPlaceholder')}
                 className="input search-input text-sm"
               />
             </div>
@@ -575,7 +578,7 @@ export default function SeriesView() {
                   onClick={() => setFilter(f.key)}
                   className={clsx('chip', filter === f.key && 'active', toolbarFocused === i + 1 && 'gamepad-focus')}
                 >
-                  {f.label}
+                  {t(f.label)}
                 </button>
               ))}
             </div>
@@ -584,7 +587,7 @@ export default function SeriesView() {
               {dragEnabled && (
                 <span className="hidden xl:flex items-center gap-1.5 text-xs text-text-tertiary">
                   <GripVertical size={13} />
-                  拖动海报可调整顺序
+                  {t('series.dragHint')}
                 </span>
               )}
               <SortMenu
@@ -602,7 +605,7 @@ export default function SeriesView() {
             {displayList.length === 0 ? (
               <div className="py-20 flex flex-col items-center gap-3">
                 <Search size={32} className="text-text-tertiary" />
-                <p className="text-sm text-text-secondary">没有匹配的影视</p>
+                <p className="text-sm text-text-secondary">{t('series.noMatch')}</p>
               </div>
             ) : (
               <div
@@ -637,7 +640,7 @@ export default function SeriesView() {
 
                         <div className="poster-badges">
                           {done && (
-                            <span className="poster-done"><CheckCheck size={12} />已看完</span>
+                            <span className="poster-done"><CheckCheck size={12} />{t('series.finished')}</span>
                           )}
                         </div>
                         {!done && s.media_type === 'tv' && pct > 0 && (
@@ -660,14 +663,14 @@ export default function SeriesView() {
                           <p className="poster-hover-title">{s.title}</p>
                           <p className="poster-hover-meta">
                             {(s.media_type === 'movie'
-                              ? [yearOf(s.first_air_date), '电影']
-                              : [yearOf(s.first_air_date), s.season_count > 0 ? `${s.season_count} 季` : '', s.episode_count > 0 ? `${s.episode_count} 集` : '']
-                            ).filter(Boolean).join(' · ') || '未获取信息'}
+                              ? [yearOf(s.first_air_date), t('series.movie')]
+                              : [yearOf(s.first_air_date), s.season_count > 0 ? t('series.seasonCount', { n: s.season_count }) : '', s.episode_count > 0 ? t('series.episodeCount', { n: s.episode_count }) : '']
+                            ).filter(Boolean).join(' · ') || t('series.noInfo')}
                           </p>
                           {done ? (
                             <p className="poster-hover-done">
                               <CheckCheck size={12} />
-                              已看完
+                              {t('series.finished')}
                             </p>
                           ) : pct > 0 ? (
                             <div className="poster-hover-progress">
@@ -684,11 +687,8 @@ export default function SeriesView() {
                                 onClick={(e) => { e.stopPropagation(); void playNext(s); }}
                               >
                                 <Play size={13} fill="currentColor" />
-                                {s.media_type === 'movie' ? '播放电影' : (
-                                  <>
-                                    播放 S{String(s.next_episode.season_number).padStart(2, '0')}
-                                    E{String(s.next_episode.episode_number).padStart(2, '0')}
-                                  </>
+                                {s.media_type === 'movie' ? t('series.playMovie') : (
+                                  t('series.playEp', { se: `S${String(s.next_episode.season_number).padStart(2, '0')}E${String(s.next_episode.episode_number).padStart(2, '0')}` })
                                 )}
                               </button>
                             </div>
@@ -699,9 +699,9 @@ export default function SeriesView() {
                           <p className="poster-name">{s.title}</p>
                           <p className="poster-sub">
                             {(s.media_type === 'movie'
-                              ? [yearOf(s.first_air_date), '电影']
-                              : [yearOf(s.first_air_date), s.season_count > 0 ? `${s.season_count} 季` : '', s.episode_count > 0 ? `${s.episode_count} 集` : '']
-                            ).filter(Boolean).join(' · ') || '未获取信息'}
+                              ? [yearOf(s.first_air_date), t('series.movie')]
+                              : [yearOf(s.first_air_date), s.season_count > 0 ? t('series.seasonCount', { n: s.season_count }) : '', s.episode_count > 0 ? t('series.episodeCount', { n: s.episode_count }) : '']
+                            ).filter(Boolean).join(' · ') || t('series.noInfo')}
                           </p>
                         </div>
                       </div>
@@ -774,11 +774,11 @@ export default function SeriesView() {
         <LibraryContextMenu x={libMenu.x} y={libMenu.y} onClose={() => setLibMenu(null)}>
           <button onClick={() => { setLibMenu(null); setShowAddModal(true); }} className="context-menu-item">
             <Plus size={14} className="text-[#00d4ff]" />
-            添加影视
+            {t('series.addSeries')}
           </button>
           <button onClick={() => { setLibMenu(null); void loadSeries(); }} className="context-menu-item">
             <Sparkles size={14} className="text-text-secondary" />
-            刷新影视库
+            {t('series.refreshLibrary')}
           </button>
         </LibraryContextMenu>
       )}
@@ -788,7 +788,7 @@ export default function SeriesView() {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[120] glass-card px-5 py-4 min-w-[320px] flex flex-col gap-2.5 animate-fade-up">
           <div className="flex items-center gap-3 text-sm">
             <Loader2 size={15} className="animate-spin text-[#00d4ff]" />
-            <span className="truncate">正在从 TMDB 获取《{fetchingTitle}》</span>
+            <span className="truncate">{t('series.fetchingMeta', { title: fetchingTitle })}</span>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex-1 h-1.5 rounded-full bg-bg-surface-active overflow-hidden">

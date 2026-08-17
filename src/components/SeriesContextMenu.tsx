@@ -5,6 +5,7 @@ import { useAppStore } from '../store';
 import { Info, Star, Trash2, Sparkles, HardDrive } from 'lucide-react';
 import type { Series } from '../types';
 import { useFocusIndex, useModalGamepad } from '../gamepad';
+import { useT } from '../i18n';
 
 interface Props {
   series: Series;
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export default function SeriesContextMenu({ series, x, y, onOpen, onDelete, onAutoFetch, onDiskManage, onClose }: Props) {
+  const t = useT();
   const toggleSeriesFavorite = useAppStore((s) => s.toggleSeriesFavorite);
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
@@ -74,21 +76,21 @@ export default function SeriesContextMenu({ series, x, y, onOpen, onDelete, onAu
       <div className="glass-card w-52 py-1.5 animate-scale-in">
         <button onClick={handleOpen} className={clsx('context-menu-item', focused === 0 && 'gamepad-focus')}>
           <Info size={14} className="text-[#00d4ff]" />
-          查看详情
+          {t('series.viewDetail')}
         </button>
         <button
           onClick={() => { onClose(); onAutoFetch(); }}
           className={clsx('context-menu-item', focused === 1 && 'gamepad-focus')}
         >
           <Sparkles size={14} className="text-text-secondary" />
-          获取元数据（TMDB）
+          {t('series.fetchMeta')}
         </button>
         <button
           onClick={() => { onClose(); onDiskManage(); }}
           className={clsx('context-menu-item', focused === 2 && 'gamepad-focus')}
         >
           <HardDrive size={14} className="text-text-secondary" />
-          磁盘管理
+          {t('disk.manage')}
         </button>
         <div className="context-menu-divider" />
         <button onClick={toggleFavorite} className={clsx('context-menu-item', focused === 3 && 'gamepad-focus')}>
@@ -97,12 +99,12 @@ export default function SeriesContextMenu({ series, x, y, onOpen, onDelete, onAu
             className={series.favorite ? 'text-yellow-400' : 'text-text-secondary'}
             fill={series.favorite ? 'currentColor' : 'none'}
           />
-          {series.favorite ? '取消收藏' : '收藏'}
+          {series.favorite ? t('series.unfavorite') : t('series.favorite')}
         </button>
         <div className="context-menu-divider" />
         <button onClick={handleDelete} className={clsx('context-menu-item text-danger', focused === 4 && 'gamepad-focus')}>
           <Trash2 size={14} />
-          删除影视
+          {t('series.deleteSeries')}
         </button>
       </div>
     </div>,

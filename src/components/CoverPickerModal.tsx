@@ -4,6 +4,7 @@ import { clsx } from 'clsx';
 import type { Game } from '../types';
 import * as api from '../api';
 import { useModalGamepad } from '../gamepad';
+import { useT } from '../i18n';
 
 interface Props {
   game: Game;
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export default function CoverPickerModal({ game, kind = 'portrait', onClose, onApplied }: Props) {
+  const t = useT();
   const [options, setOptions] = useState<api.CoverOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -28,7 +30,7 @@ export default function CoverPickerModal({ game, kind = 'portrait', onClose, onA
     api.fetchCoverOptions(game.id, kind)
       .then((opts) => { if (!cancelled) setOptions(opts); })
       .catch((err) => {
-        if (!cancelled) setError(typeof err === 'string' ? err : ((err as any)?.message || '获取封面失败'));
+        if (!cancelled) setError(typeof err === 'string' ? err : ((err as any)?.message || t('misc.coverFetchFailed')));
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -44,7 +46,7 @@ export default function CoverPickerModal({ game, kind = 'portrait', onClose, onA
       }
       onApplied();
     } catch (err) {
-      setError(typeof err === 'string' ? err : ((err as any)?.message || '设置封面失败'));
+      setError(typeof err === 'string' ? err : ((err as any)?.message || t('misc.coverSetFailed')));
       setApplying(null);
     }
   };
@@ -68,7 +70,7 @@ export default function CoverPickerModal({ game, kind = 'portrait', onClose, onA
               <ImagePlus size={18} className="text-[#00d4ff]" />
             </div>
             <div>
-              <h2 className="text-lg font-bold leading-tight">{kind === 'wide' ? '更换悬停封面' : '更换主封面'}</h2>
+              <h2 className="text-lg font-bold leading-tight">{kind === 'wide' ? t('games.changeBanner') : t('games.changeCover')}</h2>
               <p className="text-xs text-text-secondary mt-0.5">{game.name}</p>
             </div>
           </div>
@@ -85,17 +87,17 @@ export default function CoverPickerModal({ game, kind = 'portrait', onClose, onA
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3 text-text-secondary">
               <Loader2 size={28} className="animate-spin text-[#00d4ff]" />
-              <span className="text-sm">正在获取封面...</span>
+              <span className="text-sm">{t('misc.coverLoading')}</span>
             </div>
           ) : error ? (
             <div className="py-16 text-center">
               <p className="text-sm text-[#ef4444] mb-3">{error}</p>
-              <button onClick={onClose} className="btn btn-glass text-sm px-5">关闭</button>
+              <button onClick={onClose} className="btn btn-glass text-sm px-5">{t('common.close')}</button>
             </div>
           ) : options.length === 0 ? (
             <div className="py-16 text-center">
-              <p className="text-sm text-text-secondary mb-1">没有找到可用的竖版封面</p>
-              <p className="text-xs text-text-tertiary">该游戏在 SteamGridDB 上没有 600×900 封面</p>
+              <p className="text-sm text-text-secondary mb-1">{t('misc.coverNonePortrait')}</p>
+              <p className="text-xs text-text-tertiary">{t('misc.coverNoneSgdb')}</p>
             </div>
           ) : (
             <div className={kind === 'wide' ? 'grid grid-cols-1 md:grid-cols-2 gap-3' : 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3'}>
@@ -105,7 +107,7 @@ export default function CoverPickerModal({ game, kind = 'portrait', onClose, onA
                   onClick={() => handlePick(opt)}
                   disabled={applying !== null}
                   className="group relative rounded-xl overflow-hidden border border-border-glass hover:border-[#00d4ff]/50 transition-all text-left"
-                  title={`${opt.width}×${opt.height} · ${opt.author || '未知作者'}`}
+                  title={`${opt.width}×${opt.height} · ${opt.author || t('misc.unknownAuthor')}`}
                 >
                   <img
                     src={opt.thumb}

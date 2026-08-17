@@ -4,12 +4,14 @@ import * as api from '../api';
 import { X, Plus, FolderOpen, Terminal, Layers, Gamepad2, Sparkles, AlertCircle, Folder } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useModalGamepad } from '../gamepad';
+import { useT } from '../i18n';
 
 interface Props {
   onClose: () => void;
 }
 
 export default function AddGameModal({ onClose }: Props) {
+  const t = useT();
   const createGame = useAppStore((s) => s.createGame);
   const loadGames = useAppStore((s) => s.loadGames);
   const [name, setName] = useState('');
@@ -29,7 +31,7 @@ export default function AddGameModal({ onClose }: Props) {
       const selected = await open({
         multiple: false,
         filters: [{
-          name: '可执行文件',
+          name: t('games.exeFilter'),
           extensions: ['exe']
         }]
       });
@@ -70,7 +72,7 @@ export default function AddGameModal({ onClose }: Props) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) { setError('请输入游戏名称'); return; }
+    if (!name.trim()) { setError(t('games.nameRequired')); return; }
     // 安装目录与启动程序必须关联：安装目录填成别的游戏的目录（如把 D:\Epic 赋给 DSX），
     // 磁盘管理移动时会把无关目录整个搬走+删掉 —— 前端先拦一道
     const exeTrim = exePath.trim();
@@ -79,7 +81,7 @@ export default function AddGameModal({ onClose }: Props) {
       const dirNorm = installDirFinal.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
       const exeNorm = exeTrim.replace(/\\/g, '/').toLowerCase();
       if (!exeNorm.startsWith(dirNorm + '/')) {
-        setError('启动程序不在该安装目录内。安装目录应填写「包含启动程序在内的整个游戏文件夹」');
+        setError(t('games.dirMismatch'));
         return;
       }
     }
@@ -125,7 +127,7 @@ export default function AddGameModal({ onClose }: Props) {
       onClose();
     } catch (err: any) {
       console.error('Failed to create game:', err);
-      setError(err.message || err.toString() || '添加失败');
+      setError(err.message || err.toString() || t('games.addFailed'));
     } finally {
       setLoading(false);
     }
@@ -153,21 +155,21 @@ export default function AddGameModal({ onClose }: Props) {
             </div>
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <h2 className="text-xl font-bold tracking-tight">添加游戏</h2>
+                <h2 className="text-xl font-bold tracking-tight">{t('games.addGame')}</h2>
                 <span className="badge badge-accent gap-1">
                   <Sparkles size={11} />
-                  手动录入
+                  {t('games.manualEntry')}
                 </span>
               </div>
               <p className="text-sm text-text-secondary leading-relaxed">
-                填写游戏名称并选择启动程序，添加后可在详情中继续补充封面、标签和备注。
+                {t('games.addGameDesc')}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="w-10 h-10 rounded-xl flex items-center justify-center text-text-secondary hover:text-white hover:bg-bg-surface-active transition-all"
-            title="关闭"
+            title={t('common.close')}
           >
             <X size={18} />
           </button>
@@ -187,13 +189,13 @@ export default function AddGameModal({ onClose }: Props) {
               <section className="glass-card p-4 hover:transform-none">
                 <label className={labelClass}>
                   <Layers size={13} />
-                  游戏名称 <span className="text-[#00d4ff]">*</span>
+                  {t('games.name')} <span className="text-[#00d4ff]">*</span>
                 </label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className={inputClass}
-                  placeholder="例如：Cyberpunk 2077"
+                  placeholder={t('games.namePlaceholder')}
                   autoFocus
                 />
               </section>
@@ -201,58 +203,58 @@ export default function AddGameModal({ onClose }: Props) {
               <section className="glass-card p-4 hover:transform-none">
                 <label className={labelClass}>
                   <FolderOpen size={13} />
-                  启动程序
+                  {t('games.exePath')}
                 </label>
                 <div className="flex gap-2">
                   <input
                     value={exePath}
                     onChange={(e) => setExePath(e.target.value)}
                     className={inputClass}
-                    placeholder="C:\\Games\\MyGame\\game.exe"
+                    placeholder={t('games.exePlaceholder')}
                   />
                   <button
                     type="button"
                     onClick={handleSelectExe}
                     className="shrink-0 h-11 px-4 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.25)] hover:bg-[rgba(0,212,255,0.22)] flex items-center justify-center gap-2 text-sm text-[#00d4ff] transition-all"
-                    title="选择 exe 文件"
+                    title={t('games.pickExeTitle')}
                   >
                     <FolderOpen size={16} />
-                    浏览
+                    {t('common.browse')}
                   </button>
                 </div>
                 <p className="mt-2 text-xs text-text-tertiary">
-                  也可以先只填写名称，之后在游戏详情里再补充启动路径。
+                  {t('games.exePathHint')}
                 </p>
               </section>
 
               <section className="glass-card p-4 hover:transform-none">
                 <label className={labelClass}>
                   <Folder size={13} />
-                  安装目录
+                  {t('games.installDir')}
                 </label>
                 <div className="flex gap-2">
                   <input
                     value={installDir}
                     onChange={(e) => setInstallDir(e.target.value)}
                     className={inputClass}
-                    placeholder="整个游戏文件夹，如 D:\\Games\\Cyberpunk 2077"
+                    placeholder={t('games.installPlaceholder')}
                   />
                   <button
                     type="button"
                     onClick={handleSelectFolder}
                     className="shrink-0 h-11 px-4 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.25)] hover:bg-[rgba(0,212,255,0.22)] flex items-center justify-center gap-2 text-sm text-[#00d4ff] transition-all"
-                    title="选择游戏文件夹（自动查找启动程序）"
+                    title={t('games.pickDirTitle')}
                   >
                     <Folder size={16} />
-                    浏览
+                    {t('common.browse')}
                   </button>
                 </div>
                 <p className="mt-2 text-xs text-text-tertiary">
-                  选择启动程序后会自动向上探测整个游戏目录；也可以直接选游戏文件夹，自动查找启动程序。
+                  {t('games.installHint')}
                 </p>
                 {!installDir.trim() && (
                   <p className="mt-1.5 text-xs text-[#eab308]/80">
-                    未填安装目录：该游戏将无法在磁盘管理中移动（请先在详情里补上）
+                    {t('games.installMissingWarn')}
                   </p>
                 )}
               </section>
@@ -260,13 +262,13 @@ export default function AddGameModal({ onClose }: Props) {
               <section className="glass-card p-4 hover:transform-none">
                 <label className={labelClass}>
                   <Terminal size={13} />
-                  启动参数
+                  {t('games.launchArgs')}
                 </label>
                 <input
                   value={launchArgs}
                   onChange={(e) => setLaunchArgs(e.target.value)}
                   className={inputClass}
-                  placeholder="可选，例如：-skipintro -windowed"
+                  placeholder={t('games.launchArgsPlaceholder')}
                 />
               </section>
             </div>
@@ -278,19 +280,19 @@ export default function AddGameModal({ onClose }: Props) {
                     <Gamepad2 size={30} className="text-[#00d4ff]" />
                   </div>
                 </div>
-                <p className="text-sm font-semibold truncate">{name.trim() || '新游戏'}</p>
+                <p className="text-sm font-semibold truncate">{name.trim() || t('games.newGame')}</p>
                 <p className="mt-1 text-xs text-text-secondary break-all line-clamp-3">
-                  {exePath.trim() || '选择启动程序后，这里会显示路径预览'}
+                  {exePath.trim() || t('games.pathPreviewHint')}
                 </p>
               </div>
               <div className="mt-4 pt-4 border-t border-border-glass space-y-2 text-xs text-text-secondary">
                 <div className="flex items-center justify-between">
-                  <span>封面</span>
-                  <span className="text-text-tertiary">添加后设置</span>
+                  <span>{t('games.coverLabel')}</span>
+                  <span className="text-text-tertiary">{t('games.setAfterAdd')}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>标签</span>
-                  <span className="text-text-tertiary">添加后编辑</span>
+                  <span>{t('games.tagsLabel')}</span>
+                  <span className="text-text-tertiary">{t('games.editAfterAdd')}</span>
                 </div>
               </div>
             </aside>
@@ -298,13 +300,13 @@ export default function AddGameModal({ onClose }: Props) {
 
           {/* Footer */}
           <div className="flex items-center justify-between gap-3 pt-2">
-            <p className="text-xs text-text-tertiary">带 * 的字段为必填项</p>
+            <p className="text-xs text-text-tertiary">{t('games.requiredHint')}</p>
             <div className="flex justify-end gap-3">
               <button type="button" onClick={onClose} className="btn btn-ghost py-3 px-5 text-sm">
-                取消
+                {t('common.cancel')}
               </button>
               <button type="submit" disabled={loading} className="btn btn-accent py-3 px-6 text-sm disabled:opacity-60 disabled:cursor-not-allowed">
-                {loading ? '添加中...' : (<><Plus size={15} />添加游戏</>)}
+                {loading ? t('games.adding') : (<><Plus size={15} />{t('games.addGame')}</>)}
               </button>
             </div>
           </div>

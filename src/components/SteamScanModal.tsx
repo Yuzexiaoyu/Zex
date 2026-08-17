@@ -3,22 +3,23 @@ import { X, Gamepad2, Check, Loader2 } from 'lucide-react';
 import * as api from '../api';
 import { clsx } from 'clsx';
 import { useModalGamepad } from '../gamepad';
+import { useT } from '../i18n';
 
 interface Props {
   onClose: () => void;
   onImported?: () => void;
 }
 
-/** Steam 端已玩分钟 → "497h37m" / "42m"（0 显示「未记录」） */
-function formatPlaytime(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (h > 0) return `${h}h${String(m).padStart(2, '0')}m`;
-  if (m > 0) return `${m}m`;
-  return '未记录';
-}
-
 export default function SteamScanModal({ onClose, onImported }: Props) {
+  const t = useT();
+  // Steam 端已玩分钟 → "497h37m" / "42m"（0 显示「未记录」）
+  const formatPlaytime = (minutes: number): string => {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h > 0) return `${h}h${String(m).padStart(2, '0')}m`;
+    if (m > 0) return `${m}m`;
+    return t('games.playtimeNone');
+  };
   const [status, setStatus] = useState<'idle' | 'scanning' | 'selecting' | 'importing' | 'done'>('scanning');
   const [steamGames, setSteamGames] = useState<api.SteamGame[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -62,7 +63,7 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
     try {
       const games = await api.scanSteamLibrary();
       if (games.length === 0) {
-        setError('未找到 Steam 游戏。请确保 Steam 已安装并至少运行过一次。');
+        setError(t('games.steamNotFound'));
         setStatus('idle');
         return;
       }
@@ -79,7 +80,7 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
       ));
       setStatus('selecting');
     } catch (err: any) {
-      setError(typeof err === 'string' ? err : (err?.message || '扫描失败'));
+      setError(typeof err === 'string' ? err : (err?.message || t('games.scanFailed')));
       setStatus('idle');
     }
   };
@@ -141,11 +142,11 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
           const res = await api.fetchAllSteamCovers();
           setCoverMsg(
             res.total === 0
-              ? '所有 Steam 游戏都已配置封面'
-              : `封面获取完成：共处理 ${res.total} 个游戏，成功 ${res.ok} 张，失败 ${res.fail} 张`,
+              ? t('games.fetchAllDone')
+              : t('games.fetchCoverDone', { total: res.total, ok: res.ok, fail: res.fail }),
           );
         } catch (err: any) {
-          setCoverMsg(`封面获取失败：${typeof err === 'string' ? err : (err?.message ?? String(err))}`);
+          setCoverMsg(t('games.fetchCoverFailed', { msg: typeof err === 'string' ? err : (err?.message ?? String(err)) }));
         } finally {
           setCoverPhase('done');
           // 封面是导入后异步写库的：onImported（loadGames）在导入完成时已刷过一次，
@@ -154,7 +155,7 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
         }
       }
     } catch (err: any) {
-      setError(typeof err === 'string' ? err : (err?.message || '导入失败'));
+      setError(typeof err === 'string' ? err : (err?.message || t('games.importFailed')));
       setStatus('selecting');
     }
   };
@@ -172,13 +173,13 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
             <div className="w-9 h-9 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.2)] flex items-center justify-center">
               <Gamepad2 size={18} className="text-[#00d4ff]" />
             </div>
-            <h2 className="text-lg font-bold">扫描 Steam 库</h2>
+            <h2 className="text-lg font-bold">{t('games.scanTitle')}</h2>
           </div>
           <button
             onClick={guardedClose}
             disabled={busy}
             className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-white hover:bg-bg-surface-active transition-all disabled:opacity-40 disabled:hover:bg-transparent"
-            title={busy ? '导入进行中，请等待完成' : '关闭'}
+            title={busy ? t('games.importingBusy') : t('common.close')}
           >
             <X size={18} />
           </button>
@@ -197,9 +198,9 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
               <div className="w-24 h-24 mx-auto mb-6 rounded-3xl bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.15)] flex items-center justify-center">
                 <Gamepad2 size={40} className="text-[#ef4444]/40" />
               </div>
-              <p className="text-text-secondary mb-6 text-sm">扫描失败，请检查 Steam 后重试</p>
+              <p className="text-text-secondary mb-6 text-sm">{t('games.steamScanFailed')}</p>
               <button onClick={scan} className="btn btn-accent py-3 px-10 text-sm">
-                重新扫描
+                {t('games.rescan')}
               </button>
             </div>
           )}
@@ -208,7 +209,7 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
           {status === 'scanning' && (
             <div className="text-center py-10">
               <Loader2 size={48} className="mx-auto mb-4 text-[#00d4ff] animate-spin" />
-              <p className="text-text-secondary">正在扫描 Steam 库...</p>
+              <p className="text-text-secondary">{t('games.scanningSteam')}</p>
             </div>
           )}
 
@@ -217,16 +218,15 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
             <>
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm text-text-secondary">
-                  找到 <span className="text-white font-semibold">{steamGames.length}</span> 个游戏，
-                  已选择 <span className="text-[#00d4ff] font-semibold">{selected.size}</span> 个
+                  {t('games.foundPrefix')} <span className="text-white font-semibold">{steamGames.length}</span> {t('games.foundMid')} <span className="text-[#00d4ff] font-semibold">{selected.size}</span> {t('games.foundSuffix')}
                   {steamGames.some((g) => g.already_imported) && (
                     <span className="text-text-tertiary">
-                      （{steamGames.filter((g) => g.already_imported).length} 个已导入，置底不勾选）
+                      {t('games.alreadyImportedNote', { n: steamGames.filter((g) => g.already_imported).length })}
                     </span>
                   )}
                 </p>
                 <button onClick={toggleAll} className="text-xs text-[#00d4ff]/70 hover:text-[#00d4ff] transition-colors">
-                  {selected.size === steamGames.filter((g) => !g.already_imported).length && selected.size > 0 ? '取消全选' : '全选未导入'}
+                  {selected.size === steamGames.filter((g) => !g.already_imported).length && selected.size > 0 ? t('common.deselectAll') : t('games.selectAllUnimported')}
                 </button>
               </div>
 
@@ -234,16 +234,16 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
               {status === 'importing' && total > 0 && (
                 <div className="mb-4 p-3 rounded-xl bg-[rgba(0,212,255,0.06)] border border-[rgba(0,212,255,0.15)] text-sm text-text-secondary flex items-center gap-2">
                   <Loader2 size={14} className="animate-spin text-[#00d4ff] shrink-0" />
-                  正在下载封面并导入
+                  {t('games.importingWithCovers')}
                   <span className="text-[#00d4ff] font-semibold">{processed}</span>
-                  / {total} 个（已导入 {imported}）
+                  / {total} {t('games.importSuffix', { imported })}
                 </div>
               )}
 
               {/* 全部游戏都没读到 Steam 时长：提示但不阻塞导入 */}
               {steamGames.every((g) => g.playtime_minutes === 0) && (
                 <div className="mb-3 p-2.5 rounded-xl bg-[rgba(234,179,8,0.07)] border border-[rgba(234,179,8,0.15)] text-xs text-[#eab308]/80">
-                  未读取到 Steam 时长（localconfig.vdf 未找到或为空），导入后时长从 0 开始计时
+                  {t('games.noSteamPlaytime')}
                 </div>
               )}
 
@@ -274,15 +274,15 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
                     <span className="badge text-[10px] shrink-0">{String(game.app_id)}</span>
                     {game.already_imported && (
                       <span className="badge text-[10px] shrink-0 bg-[rgba(148,163,184,0.15)] border-[rgba(148,163,184,0.2)] text-text-tertiary">
-                        已导入
+                        {t('games.importedBadge')}
                       </span>
                     )}
                     {game.playtime_minutes > 0 ? (
                       <span className="text-xs text-[#00d4ff] whitespace-nowrap shrink-0">
-                        Steam 已玩 {formatPlaytime(game.playtime_minutes)}
+                        {t('games.steamPlayed', { time: formatPlaytime(game.playtime_minutes) })}
                       </span>
                     ) : (
-                      <span className="text-xs text-text-tertiary whitespace-nowrap shrink-0">未记录</span>
+                      <span className="text-xs text-text-tertiary whitespace-nowrap shrink-0">{t('games.playtimeNone')}</span>
                     )}
                   </label>
                 ))}
@@ -296,11 +296,11 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
                     onChange={(e) => setFetchCovers(e.target.checked)}
                     className="w-3.5 h-3.5 rounded accent-[#00d4ff]"
                   />
-                  导入后自动从 Steam CDN 获取缺失封面
+                  {t('games.autoFetchCovers')}
                 </label>
                 <div className="flex gap-3 shrink-0">
                   <button onClick={guardedClose} disabled={busy} className="btn btn-ghost py-3 px-5 text-sm disabled:opacity-50">
-                    取消
+                    {t('common.cancel')}
                   </button>
                   <button
                     onClick={importSelected}
@@ -308,7 +308,7 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
                     className="btn btn-accent py-3 px-6 text-sm"
                   >
                     {status === 'importing' && <Loader2 size={14} className="animate-spin" />}
-                    导入 {selected.size > 0 && `(${selected.size})`}
+                    {t('games.import')}{selected.size > 0 && ` (${selected.size})`}
                   </button>
                 </div>
               </div>
@@ -324,13 +324,13 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
                   <div className="w-20 h-20 mx-auto mb-5 rounded-full bg-[rgba(0,212,255,0.1)] border border-[rgba(0,212,255,0.2)] flex items-center justify-center">
                     <Loader2 size={34} className="text-[#00d4ff] animate-spin" />
                   </div>
-                  <p className="text-lg font-semibold mb-1">正在补齐缺失封面</p>
+                  <p className="text-lg font-semibold mb-1">{t('games.fetchingCovers')}</p>
                   <p className="text-text-secondary mb-5 text-sm">
-                    已导入 <span className="text-white font-semibold">{imported}</span> 个游戏，封面补齐后可关闭
+                    {t('games.fetchingCoversNote', { n: imported })}
                   </p>
                   <div className="mx-auto max-w-sm p-3 rounded-xl bg-[rgba(0,212,255,0.06)] border border-[rgba(0,212,255,0.15)] text-sm text-text-secondary flex items-center justify-center gap-2">
                     <Loader2 size={14} className="animate-spin text-[#00d4ff] shrink-0" />
-                    正在从 Steam CDN 获取缺失封面
+                    {t('games.fetchingCoversLive')}
                     {coverProgress && (
                       <span className="text-[#00d4ff] font-semibold">
                         {coverProgress.done}/{coverProgress.total}
@@ -343,13 +343,13 @@ export default function SteamScanModal({ onClose, onImported }: Props) {
                   <div className="w-20 h-20 mx-auto mb-5 rounded-full bg-[rgba(16,185,129,0.1)] border border-[rgba(16,185,129,0.2)] flex items-center justify-center">
                     <Check size={36} className="text-emerald-400" />
                   </div>
-                  <p className="text-lg font-semibold mb-2">导入成功！</p>
+                  <p className="text-lg font-semibold mb-2">{t('games.importDone')}</p>
                   <p className="text-text-secondary mb-4 text-sm">
-                    已导入 <span className="text-white font-semibold">{imported}</span> 个游戏到你的游戏库
+                    {t('games.importDoneNote', { n: imported })}
                   </p>
                   {coverMsg && <p className="mb-4 text-sm text-text-secondary">{coverMsg}</p>}
                   <button onClick={onClose} className="btn btn-accent py-3 px-10 text-sm">
-                    完成
+                    {t('games.done')}
                   </button>
                 </>
               )}

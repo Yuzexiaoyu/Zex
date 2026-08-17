@@ -11,6 +11,7 @@ import type { Game } from '../types';
 import { clsx } from 'clsx';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useFocusIndex, useGamepadGroup } from '../gamepad';
+import { useT } from '../i18n';
 
 interface Props {
   games: Game[];
@@ -40,6 +41,7 @@ interface DragState {
 export default function GameGrid({
   games, onLaunch, columns = 8, onAddGame, onOpenSteam, onOpenDiskManager,
 }: Props) {
+  const t = useT();
   // 逐字段订阅：网格里有全部可见 GameCard，不能跟着无关字段重画
   const filter = useAppStore((s) => s.filter);
   const loadGames = useAppStore((s) => s.loadGames);
@@ -280,19 +282,19 @@ export default function GameGrid({
           <div className="absolute -inset-4 rounded-full bg-[#00d4ff]/5 blur-2xl animate-pulse" />
         </div>
         <div className="text-center">
-          <p className="text-xl font-semibold text-text-primary/60 mb-2">还没有游戏</p>
-          <p className="text-sm text-text-tertiary">添加游戏或扫描 Steam 库开始</p>
+          <p className="text-xl font-semibold text-text-primary/60 mb-2">{t('games.emptyTitle')}</p>
+          <p className="text-sm text-text-tertiary">{t('games.emptyDesc')}</p>
         </div>
 
         {libMenu && (
           <LibraryContextMenu x={libMenu.x} y={libMenu.y} onClose={() => setLibMenu(null)}>
             <button onClick={() => { setLibMenu(null); onAddGame?.(); }} className="context-menu-item">
               <Plus size={14} className="text-[#00d4ff]" />
-              添加游戏
+              {t('games.addGame')}
             </button>
             <button onClick={() => { setLibMenu(null); onOpenSteam?.(); }} className="context-menu-item">
               <Gamepad2 size={14} className="text-text-secondary" />
-              Steam 扫描
+              {t('games.steamScan')}
             </button>
           </LibraryContextMenu>
         )}
@@ -407,11 +409,11 @@ export default function GameGrid({
         <LibraryContextMenu x={libMenu.x} y={libMenu.y} onClose={() => setLibMenu(null)}>
           <button onClick={() => { setLibMenu(null); onAddGame?.(); }} className="context-menu-item">
             <Plus size={14} className="text-[#00d4ff]" />
-            添加游戏
+            {t('games.addGame')}
           </button>
           <button onClick={() => { setLibMenu(null); onOpenSteam?.(); }} className="context-menu-item">
             <Gamepad2 size={14} className="text-text-secondary" />
-            Steam 扫描
+            {t('games.steamScan')}
           </button>
           {/* 每行数量已移到「设置 → 外观」，右键菜单只保留库级操作 */}
         </LibraryContextMenu>

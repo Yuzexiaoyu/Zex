@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Lock, X } from 'lucide-react';
 import * as api from './api';
+import { initLang, useT } from './i18n';
 import { activeLineIndex, LrcLine, parseLrc } from './utils/lyrics';
 
 // ── 透明窗底色 —— 必须在任何异步步骤之前执行（同托盘菜单窗）──
@@ -27,6 +28,7 @@ const FONT_MAX = 40;
 const FONT_DEFAULT = 26;
 
 function DesktopLyricsBody() {
+  const t = useT();
   const [lines, setLines] = useState<LrcLine[]>([]);
   const [idx, setIdx] = useState(-1);
   const [fontSize, setFontSize] = useState(FONT_DEFAULT);
@@ -226,7 +228,7 @@ function DesktopLyricsBody() {
           ref={unlockBtnRef}
           className="lyrics-unlock"
           onClick={() => void invoke('set_desktop_lyrics_locked', { locked: false }).catch(() => {})}
-          title="解锁桌面歌词"
+          title={t('misc.unlockLyrics')}
         >
           <Lock size={11} />
         </button>
@@ -234,15 +236,15 @@ function DesktopLyricsBody() {
       {/* 悬停工具栏：锁定时整窗鼠标穿透，工具栏理论上也到不了，双保险不渲染 */}
       {!locked && (
         <div className="lyrics-toolbar">
-          <button onClick={() => changeFont(-2)} title="字号减小">A-</button>
-          <button onClick={() => changeFont(2)} title="字号增大">A+</button>
+          <button onClick={() => changeFont(-2)} title={t('misc.fontSmaller')}>A-</button>
+          <button onClick={() => changeFont(2)} title={t('misc.fontLarger')}>A+</button>
           <button
             onClick={() => void invoke('set_desktop_lyrics_locked', { locked: true }).catch(() => {})}
-            title="锁定（点击穿透；只有右上角小锁钮可点，点它解锁）"
+            title={t('misc.lockLyrics')}
           >
             <Lock size={12} />
           </button>
-          <button onClick={closeManual} title="关闭桌面歌词">
+          <button onClick={closeManual} title={t('misc.closeLyrics')}>
             <X size={13} />
           </button>
         </div>
@@ -253,5 +255,7 @@ function DesktopLyricsBody() {
 
 // 导出挂载函数，由 main.tsx 在检测到 ?view=desktop-lyrics 时调用
 export function desktopLyrics(container: HTMLElement) {
+  // 语言：localStorage 镜像已在模块加载时同步生效，这里再按数据库纠偏
+  void initLang();
   createRoot(container).render(<DesktopLyricsBody />);
 }

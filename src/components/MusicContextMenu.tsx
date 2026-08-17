@@ -7,6 +7,7 @@ import AddToPlaylistFlyout from './AddToPlaylistFlyout';
 import type { Track } from '../types';
 import * as api from '../api';
 import { useFocusIndex, useModalGamepad } from '../gamepad';
+import { useT } from '../i18n';
 
 interface Props {
   track: Track;
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export default function MusicContextMenu({ track, x, y, onPlay, onDelete, onMultiSelect, onNewPlaylist, onClose }: Props) {
+  const t = useT();
   const toggleTrackFavorite = useAppStore((s) => s.toggleTrackFavorite);
   const playlists = useAppStore((s) => s.playlists);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -89,7 +91,7 @@ export default function MusicContextMenu({ track, x, y, onPlay, onDelete, onMult
       <div className="glass-card w-56 py-1.5 animate-scale-in">
         <button onClick={() => { onClose(); onPlay(); }} className={clsx('context-menu-item', focused === 0 && 'gamepad-focus')}>
           <Play size={14} className="text-[#00d4ff]" />
-          播放
+          {t('music.play')}
         </button>
         <button onClick={toggleFavorite} className={clsx('context-menu-item', focused === 1 && 'gamepad-focus')}>
           <Star
@@ -97,11 +99,11 @@ export default function MusicContextMenu({ track, x, y, onPlay, onDelete, onMult
             className={track.favorite ? 'text-yellow-400' : 'text-text-secondary'}
             fill={track.favorite ? 'currentColor' : 'none'}
           />
-          {track.favorite ? '取消收藏' : '收藏'}
+          {track.favorite ? t('music.unfavorite') : t('music.favorite')}
         </button>
         <button onClick={() => { onClose(); onNewPlaylist([track.id]); }} className={clsx('context-menu-item', focused === 2 && 'gamepad-focus')}>
           <ListPlus size={14} className="text-text-secondary" />
-          新建歌单
+          {t('music.newPlaylist')}
         </button>
         {/* 还没有任何歌单时没有可添加的目标，「添加到歌单」不显示（悬浮二级菜单往右展开） */}
         {hasFlyout && (
@@ -115,17 +117,17 @@ export default function MusicContextMenu({ track, x, y, onPlay, onDelete, onMult
         )}
         <button onClick={openFolder} className={clsx('context-menu-item', focused === (hasFlyout ? 4 : 3) && 'gamepad-focus')}>
           <FolderOpen size={14} className="text-text-secondary" />
-          打开所在文件夹
+          {t('music.openFolder')}
         </button>
         <div className="context-menu-divider" />
         <button onClick={() => { onClose(); onMultiSelect(); }} className={clsx('context-menu-item', focused === (hasFlyout ? 5 : 4) && 'gamepad-focus')}>
           <CheckSquare size={14} className="text-text-secondary" />
-          多选
+          {t('music.multiSelect')}
         </button>
         <div className="context-menu-divider" />
         <button onClick={onDelete} className={clsx('context-menu-item text-danger', focused === (hasFlyout ? 6 : 5) && 'gamepad-focus')}>
           <Trash2 size={14} />
-          从库移除
+          {t('music.removeFromLibrary')}
         </button>
       </div>
     </div>,

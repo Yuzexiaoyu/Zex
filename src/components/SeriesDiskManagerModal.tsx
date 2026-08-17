@@ -7,6 +7,7 @@ import { confirm, message } from '@tauri-apps/plugin-dialog';
 import { HardDrive, X, ArrowRight, Film, XCircle, AlertTriangle, Loader2, Check, SlidersHorizontal } from 'lucide-react';
 import type { DiskVolume, SeriesDiskEntry, SeriesMoveResult } from '../types';
 import { useModalGamepad } from '../gamepad';
+import { useT } from '../i18n';
 
 // 待移动项（剧 id → 迁移方案，同剧多次拖拽以后一次为准）
 interface MoveItem {
@@ -48,6 +49,7 @@ function safeFolderName(name: string): string {
 }
 
 export default function SeriesDiskManagerModal({ onClose }: Props) {
+  const t = useT();
   const [volumes, setVolumes] = useState<DiskVolume[]>([]);
   const [entries, setEntries] = useState<SeriesDiskEntry[]>([]);
   const [moves, setMoves] = useState<Record<string, MoveItem>>({});
@@ -295,8 +297,8 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
   const handleApply = async () => {
     if (moveCount === 0 || applying) return;
     const ok = await confirm(
-      `确定要把 ${moveCount} 部影视移动到目标磁盘吗？\n\n跨盘移动会复制视频文件并删除源文件（约需几分钟到几十分钟不等），期间请勿关闭窗口。`,
-      { title: '影视磁盘管理', kind: 'warning' },
+      t('disk.applyConfirmSeries', { n: moveCount }),
+      { title: t('disk.manage'), kind: 'warning' },
     );
     if (!ok) return;
     setApplying(true);
@@ -309,7 +311,7 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
       setMoves({});
       setDropTarget(null);
     } catch (err: any) {
-      await message(`移动失败：${err?.message ?? err}`, { title: '影视磁盘管理', kind: 'error' });
+      await message(t('disk.moveFailed', { msg: err?.message ?? err }), { title: t('disk.manage'), kind: 'error' });
     } finally {
       setApplying(false);
       setCancelling(false);
@@ -354,8 +356,8 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
               <HardDrive size={18} className="text-[#00d4ff]" />
             </div>
             <div>
-              <h2 className="text-lg font-bold leading-tight">磁盘管理</h2>
-              <p className="text-xs text-text-secondary mt-0.5">拖拽整部剧到目标磁盘，底部查看容量预览</p>
+              <h2 className="text-lg font-bold leading-tight">{t('disk.manage')}</h2>
+              <p className="text-xs text-text-secondary mt-0.5">{t('disk.descSeries')}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -370,10 +372,10 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                     ? 'bg-[rgba(0,212,255,0.12)] border-[rgba(0,212,255,0.3)] text-[#00d4ff]'
                     : 'bg-bg-surface border-border-glass text-text-secondary hover:text-white hover:bg-bg-surface-active'
                 }`}
-                title="选择要显示的卷"
+                title={t('disk.pickDrivesTitle')}
               >
                 <SlidersHorizontal size={14} />
-                显示卷
+                {t('disk.showDrives')}
                 {hiddenDrives.size > 0 && (
                   <span className="px-1 rounded bg-[#00d4ff]/20 text-[10px]">{hiddenDrives.size}</span>
                 )}
@@ -386,8 +388,8 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="px-4 py-3 border-b border-border-glass flex items-center justify-between">
-                    <p className="text-sm font-semibold">显示哪些卷</p>
-                    <span className="text-xs text-text-tertiary">{visibleVolumes.length}/{volumes.length} 已显示</span>
+                    <p className="text-sm font-semibold">{t('disk.whichDrives')}</p>
+                    <span className="text-xs text-text-tertiary">{t('disk.shownCount', { shown: visibleVolumes.length, total: volumes.length })}</span>
                   </div>
                   <div className="p-2 max-h-64 overflow-y-auto space-y-0.5">
                     {volumes.map((v) => {
@@ -409,17 +411,17 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                               {v.label && <span className="text-text-tertiary font-normal"> · {v.label}</span>}
                             </span>
                             <span className="block text-[11px] text-text-tertiary leading-tight">
-                              {fmtBytes(v.total)} · {(entriesByDrive[v.drive] || []).length} 部
+                              {fmtBytes(v.total)} · {t('disk.countSeries', { n: (entriesByDrive[v.drive] || []).length })}
                             </span>
                           </span>
-                          {!checked && <span className="text-[10px] text-text-tertiary shrink-0">已隐藏</span>}
+                          {!checked && <span className="text-[10px] text-text-tertiary shrink-0">{t('disk.hidden')}</span>}
                         </label>
                       );
                     })}
                   </div>
                   <div className="px-3 py-2 border-t border-border-glass flex gap-2">
-                    <button onClick={showAllDrives} className="flex-1 text-xs py-1.5 rounded-lg bg-bg-surface hover:bg-bg-surface-active text-text-secondary">全部显示</button>
-                    <button onClick={hideAllDrives} className="flex-1 text-xs py-1.5 rounded-lg bg-bg-surface hover:bg-bg-surface-active text-text-secondary">全部隐藏</button>
+                    <button onClick={showAllDrives} className="flex-1 text-xs py-1.5 rounded-lg bg-bg-surface hover:bg-bg-surface-active text-text-secondary">{t('disk.showAll')}</button>
+                    <button onClick={hideAllDrives} className="flex-1 text-xs py-1.5 rounded-lg bg-bg-surface hover:bg-bg-surface-active text-text-secondary">{t('disk.hideAll')}</button>
                   </div>
                 </div>
               )}
@@ -429,7 +431,7 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
               onClick={guardedClose}
               disabled={applying}
               className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-white hover:bg-bg-surface-active transition-all disabled:opacity-40 disabled:hover:bg-transparent"
-              title={applying ? '移动进行中，请用「取消移动」中止' : '关闭'}
+              title={applying ? t('disk.movingBusy') : t('common.close')}
             >
               <X size={18} />
             </button>
@@ -441,13 +443,13 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
           {volumes.length === 0 && !volumeError ? (
             <div className="h-full flex flex-col items-center justify-center gap-3 text-text-tertiary">
               <Loader2 size={28} className="animate-spin" />
-              <span className="text-sm">正在读取磁盘卷…</span>
+              <span className="text-sm">{t('disk.loading')}</span>
             </div>
           ) : visibleVolumes.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
               <HardDrive size={28} className="opacity-40" />
-              <span className="text-sm">所有卷已隐藏</span>
-              <button onClick={() => setShowDrivePanel(true)} className="text-xs text-[#00d4ff] hover:underline">点击选择要显示的卷</button>
+              <span className="text-sm">{t('disk.allHidden')}</span>
+              <button onClick={() => setShowDrivePanel(true)} className="text-xs text-[#00d4ff] hover:underline">{t('disk.clickToShow')}</button>
             </div>
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5 content-start">
@@ -484,11 +486,11 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                             {v.label && <span className="text-text-tertiary font-normal"> · {v.label}</span>}
                           </p>
                           <p className="text-xs text-text-tertiary mt-0.5 truncate">
-                            {v.file_system}{v.removable ? ' · 可移动' : ''} · {fmtBytes(v.total)}
+                            {v.file_system}{v.removable ? ` · ${t('disk.removable')}` : ''} · {fmtBytes(v.total)}
                           </p>
                         </div>
                       </div>
-                      <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-md bg-bg-surface text-text-secondary">{list.length} 部</span>
+                      <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-md bg-bg-surface text-text-secondary">{t('disk.countSeries', { n: list.length })}</span>
                     </div>
 
                     {/* 容量条：应用后实时预览 */}
@@ -502,8 +504,8 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                       )}
                     </div>
                     <div className="flex items-center justify-between text-xs text-text-secondary mb-3">
-                      <span>已用 {fmtBytes(v.used)}</span>
-                      <span>可用 {fmtBytes(v.available)}</span>
+                      <span>{t('disk.used', { size: fmtBytes(v.used) })}</span>
+                      <span>{t('disk.free', { size: fmtBytes(v.available) })}</span>
                     </div>
 
                     {/* 容量预览（有移动时） */}
@@ -515,8 +517,8 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                             ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
                             : 'bg-[rgba(0,212,255,0.08)] border-[rgba(0,212,255,0.2)] text-[#00d4ff]'
                       }`}>
-                        应用后可用 <b>{fmtBytes(free)}</b>
-                        {over && '（空间不足！）'}
+                        {t('disk.freeAfter')} <b>{fmtBytes(free)}</b>
+                        {over && t('disk.noSpace')}
                       </div>
                     )}
 
@@ -526,7 +528,7 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                         <div className={`h-20 rounded-xl border border-dashed flex items-center justify-center text-xs transition-colors ${
                           isDrop ? 'border-[#00d4ff]/60 text-[#00d4ff] bg-[rgba(0,212,255,0.05)]' : 'border-border-glass text-text-tertiary'
                         }`}>
-                          {isDrop ? '松开以移动到此处' : '该盘暂无影视'}
+                          {isDrop ? t('disk.dropHere') : t('disk.noneSeries')}
                         </div>
                       )}
                       {list.map((s) => {
@@ -550,12 +552,12 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                             <div className="min-w-0 flex-1 pointer-events-none">
                               <p className="text-sm font-medium text-text-primary truncate">{s.title}</p>
                               <p className="text-[11px] text-text-tertiary truncate mt-0.5">
-                                {s.files.length} 集 · {fmtBytes(s.totalSize)}
-                                {target && <span className="text-[#00d4ff]"> · 待移至 {target.to}</span>}
+                                {t('series.episodeCount', { n: s.files.length })} · {fmtBytes(s.totalSize)}
+                                {target && <span className="text-[#00d4ff]"> · {t('disk.movingTo', { drive: target.to })}</span>}
                               </p>
                             </div>
                             {target && (
-                              <button onClick={() => removeMove(s.seriesId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title="撤销移动">
+                              <button onClick={() => removeMove(s.seriesId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
                                 <XCircle size={16} />
                               </button>
                             )}
@@ -574,8 +576,8 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
         {moveCount > 0 && !applying && results.length === 0 && (
           <div className="shrink-0 border-t border-border-glass px-6 pt-3 pb-2">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-medium text-text-secondary">待移动方案</p>
-              <span className="text-[11px] text-text-tertiary">共 {moveCount} 部 · 跨盘会复制并删除源文件</span>
+              <p className="text-xs font-medium text-text-secondary">{t('disk.plans')}</p>
+              <span className="text-[11px] text-text-tertiary">{t('disk.plansSummarySeries', { n: moveCount })}</span>
             </div>
             <div className="disk-scroll-y max-h-44 overflow-y-auto space-y-1.5 pr-1">
               {Object.values(moves).map((m) => (
@@ -591,14 +593,14 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                     </p>
                     <p className="text-[11px] font-mono text-[#00d4ff] truncate leading-tight mt-0.5" title={m.targetPath}>{m.targetPath}</p>
                   </div>
-                  <button onClick={() => removeMove(m.seriesId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title="撤销移动">
+                  <button onClick={() => removeMove(m.seriesId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
                     <XCircle size={16} />
                   </button>
                 </div>
               ))}
               {unknownCount > 0 && (
                 <div className="flex items-center gap-1.5 text-[11px] text-amber-500 px-1 pt-0.5">
-                  <AlertTriangle size={12} /> {unknownCount} 部剧路径不在当前卷
+                  <AlertTriangle size={12} /> {t('disk.unknownSeries', { n: unknownCount })}
                 </div>
               )}
             </div>
@@ -614,7 +616,7 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                 moveProgress ? (
                   <div className="flex items-center gap-3">
                     <Loader2 size={15} className="animate-spin text-[#00d4ff] shrink-0" />
-                    <span className="text-xs text-text-primary truncate shrink-0 max-w-44">正在移动 {moveProgress.title}</span>
+                    <span className="text-xs text-text-primary truncate shrink-0 max-w-44">{t('disk.moving', { title: moveProgress.title })}</span>
                     <div className="flex-1 min-w-24 h-1.5 rounded-full bg-bg-surface overflow-hidden">
                       <div
                         className="h-full bg-[#00d4ff]/70 transition-[width] duration-200"
@@ -625,13 +627,13 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                   </div>
                 ) : (
                   <span className="flex items-center text-xs text-text-tertiary gap-2">
-                    <Loader2 size={14} className="animate-spin" />准备中…
+                    <Loader2 size={14} className="animate-spin" />{t('disk.preparing')}
                   </span>
                 )
               ) : results.length > 0 ? (
                 // 应用结果
                 <div className="disk-scroll-x flex items-center gap-2">
-                  <span className="text-xs text-text-tertiary shrink-0">结果：</span>
+                  <span className="text-xs text-text-tertiary shrink-0">{t('disk.result')}</span>
                   {results.map((r) => (
                     <span
                       key={r.seriesId}
@@ -643,12 +645,12 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                       }`}
                     >
                       {r.ok ? <Check size={12} className="shrink-0" /> : <AlertTriangle size={12} className="shrink-0" />}
-                      <span className="truncate min-w-0">{r.title || '未知影视'}</span>
-                      {r.ok ? '已移动' : (
+                      <span className="truncate min-w-0">{r.title || t('disk.unknownTitle')}</span>
+                      {r.ok ? t('disk.moved') : (
                         <span className="truncate">
                           {/* 取消/拒绝的长文本（含细节）放 title，chip 内截断不溢出 */}
                           {(r.error ?? '').includes('移动已取消')
-                            ? '已取消，影视留在原目录'
+                            ? t('disk.cancelledSeries')
                             : (r.error ?? '').split('\n')[0]}
                         </span>
                       )}
@@ -656,7 +658,7 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                   ))}
                 </div>
               ) : (
-                <span className="text-xs text-text-tertiary">拖拽剧集卡片到目标磁盘，形成迁移方案</span>
+                <span className="text-xs text-text-tertiary">{t('disk.hintSeries')}</span>
               )}
             </div>
             <div className="flex items-center gap-3 shrink-0">
@@ -667,11 +669,11 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                   disabled={cancelling}
                   className="btn btn-ghost px-4 py-2 text-sm disabled:opacity-50"
                 >
-                  {cancelling ? <><Loader2 size={14} className="animate-spin" />正在取消…</> : '取消移动'}
+                  {cancelling ? <><Loader2 size={14} className="animate-spin" />{t('disk.cancelling')}</> : t('disk.cancelMove')}
                 </button>
               ) : (
                 <button onClick={onClose} className="btn btn-ghost px-4 py-2 text-sm disabled:opacity-50">
-                  取消
+                  {t('common.cancel')}
                 </button>
               )}
               <button
@@ -679,7 +681,7 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                 disabled={moveCount === 0 || applying}
                 className="btn btn-accent px-5 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {applying ? <><Loader2 size={14} className="animate-spin" />移动中…</> : <><Check size={14} />应用（{moveCount}）</>}
+                {applying ? <><Loader2 size={14} className="animate-spin" />{t('disk.applying')}</> : <><Check size={14} />{t('disk.apply', { n: moveCount })}</>}
               </button>
             </div>
           </div>
@@ -703,7 +705,7 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
             <div className="min-w-0">
               <p className="text-sm font-medium text-text-primary truncate">{draggedSeries.title}</p>
               <p className="text-[11px] text-text-tertiary truncate mt-0.5">
-                {draggedSeries.drive} · {draggedSeries.files.length} 集 · {fmtBytes(draggedSeries.totalSize)}
+                {draggedSeries.drive} · {t('series.episodeCount', { n: draggedSeries.files.length })} · {fmtBytes(draggedSeries.totalSize)}
               </p>
             </div>
           </div>

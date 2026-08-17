@@ -72,8 +72,9 @@ let rScrollLast = 0;
 
 export function getConnectedPads(): ConnectedPad[] {
   const pads: ConnectedPad[] = [];
-  if (xboxCount > 0) pads.push({ id: 'xbox', name: `Xbox 手柄 ×${xboxCount}` });
-  if (psCount > 0) pads.push({ id: 'ps', name: `PS 手柄 ×${psCount}` });
+  // name 是中英通用的紧凑格式（设置页「已连接」直接显示，不参与翻译）
+  if (xboxCount > 0) pads.push({ id: 'xbox', name: `Xbox ×${xboxCount}` });
+  if (psCount > 0) pads.push({ id: 'ps', name: `PS ×${psCount}` });
   return pads;
 }
 

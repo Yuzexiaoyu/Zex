@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import { Gamepad2, Film, Music2 } from 'lucide-react';
 import type { TopEntry } from '../types';
 import { coverSrc } from '../utils/media';
+import { t } from '../i18n';
 
 // 三类媒体的统一配色：游戏＝主题青，影视＝紫，音乐＝绿（复用 --color-success 色值）
 export const MEDIA_COLORS = {
@@ -22,14 +23,16 @@ export function shortDur(seconds: number): string {
   return `${s}s`;
 }
 
-// 秒 → "1021 小时 48 分" / "42 分钟"（读起来完整）
+// 秒 → "1021 小时 48 分" / "42 分钟"（读起来完整；词条与 utils/media.ts 同源）
 export function longDur(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds || 0));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
-  if (h > 0) return m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`;
-  if (m > 0) return `${m} 分钟`;
-  return s > 0 ? '不到 1 分钟' : '0 分钟';
+  if (h > 0) return m > 0
+    ? t('common.duration.hoursMinutes', { h, m })
+    : t('common.duration.hours', { n: h });
+  if (m > 0) return t('common.duration.minutes', { n: m });
+  return s > 0 ? t('common.duration.underMinute') : t('common.duration.zero');
 }
 
 const FALLBACK_ICON = {
@@ -86,13 +89,13 @@ export function RowCard({ entry, media, color, rank, focused, anchor, onContextM
       <div className="stats-row-meta">
         {/* 游戏列含未玩过的条目（0 时长，统计页也展示）：显示「未游玩」，颜色与时长一致 */}
         {media === 'game' && entry.seconds <= 0 ? (
-          <span className="stats-row-time" style={{ color }}>未游玩</span>
+          <span className="stats-row-time" style={{ color }}>{t('stats.notPlayed')}</span>
         ) : (
           <span className="stats-row-time" style={{ color }}>{longDur(entry.seconds)}</span>
         )}
         {/* 次数只统计音乐：游戏/影视不显示 */}
         {media === 'music' && entry.count > 0 && (
-          <span className="stats-row-count">{entry.count.toLocaleString()} 次</span>
+          <span className="stats-row-count">{t('stats.countTimes', { n: entry.count.toLocaleString() })}</span>
         )}
       </div>
     </div>

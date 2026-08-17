@@ -3,6 +3,7 @@ import { MicVocal, Music2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, Skip
 import { clsx } from 'clsx';
 import { useAppStore } from '../store';
 import { coverSrc } from '../utils/media';
+import { useT } from '../i18n';
 
 // 底部全局音乐播放条：任何视图都显示（nowPlaying 为空时不渲染）。
 // 播放核心是 mpv（video=no），这里只负责控制与进度展示；
@@ -14,6 +15,7 @@ function fmtTime(ms: number): string {
 }
 
 export default function MusicPlaybackBar() {
+  const t = useT();
   // 逐字段订阅：播放条本来就要跟进度走，但不该被 games 轮询等无关字段带着重画
   const nowPlaying = useAppStore((s) => s.nowPlaying);
   const musicShuffle = useAppStore((s) => s.musicShuffle);
@@ -147,7 +149,7 @@ export default function MusicPlaybackBar() {
         {/* 歌名 / 歌手 */}
         <div className="shrink-0" style={{ width: 180 }}>
           <p className="truncate text-sm font-semibold text-text-primary">{nowPlaying.title}</p>
-          <p className="truncate text-xs text-text-secondary">{nowPlaying.artist || '未知歌手'}</p>
+          <p className="truncate text-xs text-text-secondary">{nowPlaying.artist || t('music.unknownArtist')}</p>
         </div>
 
         {/* 控制 */}
@@ -155,27 +157,27 @@ export default function MusicPlaybackBar() {
           <button
             onClick={() => void toggleMusicShuffle()}
             className={musicShuffle ? iconBtnActive : iconBtn}
-            title={musicShuffle ? '随机播放：开' : '随机播放：关'}
+            title={musicShuffle ? t('music.shuffleOn') : t('music.shuffleOff')}
           >
             <Shuffle size={15} />
           </button>
-          <button onClick={() => void musicPrev()} className={iconBtn} title="上一首">
+          <button onClick={() => void musicPrev()} className={iconBtn} title={t('music.prev')}>
             <SkipBack size={16} />
           </button>
           <button
             onClick={() => void musicTogglePause()}
             className="w-10 h-10 rounded-full bg-[#00d4ff] hover:bg-[#00b8e6] text-black flex items-center justify-center shadow-lg glow-accent transition-all"
-            title={nowPlaying.playing ? '暂停' : '播放'}
+            title={nowPlaying.playing ? t('music.pause') : t('music.play')}
           >
             {nowPlaying.playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
           </button>
-          <button onClick={() => void musicNext()} className={iconBtn} title="下一首">
+          <button onClick={() => void musicNext()} className={iconBtn} title={t('music.next')}>
             <SkipForward size={16} />
           </button>
           <button
             onClick={() => void cycleMusicLoop()}
             className={musicLoop ? iconBtnActive : iconBtn}
-            title={musicLoop === 2 ? '单曲循环' : musicLoop === 1 ? '列表循环' : '循环：关'}
+            title={musicLoop === 2 ? t('music.loopOne') : musicLoop === 1 ? t('music.loopAll') : t('music.loopOff')}
           >
             {musicLoop === 2 ? <Repeat1 size={15} /> : <Repeat size={15} />}
           </button>
@@ -184,13 +186,13 @@ export default function MusicPlaybackBar() {
             <button
               onClick={() => void onLyricsClick()}
               className={lyricsOpen ? iconBtnActive : iconBtn}
-              title="桌面歌词"
+              title={t('music.lyrics')}
             >
               <MicVocal size={15} />
             </button>
             {lyricsHint && (
               <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap glass-card px-2.5 py-1.5 text-[11px] text-text-secondary shadow-xl animate-fade-in z-20">
-                该曲无内嵌同步歌词
+                {t('music.noLyrics')}
               </div>
             )}
           </div>
@@ -230,7 +232,7 @@ export default function MusicPlaybackBar() {
           <button
             onClick={showVol}
             className={volOpen ? iconBtnActive : iconBtn}
-            title="音量"
+            title={t('music.volume')}
           >
             {volPct === 0 ? <VolumeX size={15} /> : volPct < 50 ? <Volume1 size={15} /> : <Volume2 size={15} />}
           </button>
@@ -274,7 +276,7 @@ export default function MusicPlaybackBar() {
                     transform: 'rotate(-90deg)',
                     background: `linear-gradient(to right, var(--color-accent) ${volPct}%, var(--color-bg-surface-active) ${volPct}%)`,
                   }}
-                  title="音量"
+                  title={t('music.volume')}
                 />
               </div>
               <span className="text-[11px] text-text-tertiary tabular-nums">{volPct}%</span>
@@ -283,7 +285,7 @@ export default function MusicPlaybackBar() {
         </div>
 
         {/* 停止 */}
-        <button onClick={() => void stopMusic()} className={clsx(iconBtn, 'hover:text-red-400')} title="停止播放">
+        <button onClick={() => void stopMusic()} className={clsx(iconBtn, 'hover:text-red-400')} title={t('music.stop')}>
           <X size={15} />
         </button>
       </div>

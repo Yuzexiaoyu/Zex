@@ -21,14 +21,16 @@ import {
   startGamepad, setGamepadEnabled, setInputMode, useFocusStore, useGamepadFocus, useGamepadGroup,
 } from './gamepad';
 import * as api from './api';
+import { useT, initLang } from './i18n';
 import './index.css';
 
+// label 存 i18n key，渲染时经 t() 取词（切语言即时生效）
 const navItems = [
-  { id: 'games' as const, label: '游戏库', icon: Gamepad2 },
-  { id: 'series' as const, label: '影视库', icon: Film },
-  { id: 'music' as const, label: '音乐库', icon: Music },
-  { id: 'stats' as const, label: '统计', icon: BarChart3 },
-  { id: 'settings' as const, label: '设置', icon: Settings },
+  { id: 'games' as const, label: 'nav.games', icon: Gamepad2 },
+  { id: 'series' as const, label: 'nav.series', icon: Film },
+  { id: 'music' as const, label: 'nav.music', icon: Music },
+  { id: 'stats' as const, label: 'nav.stats', icon: BarChart3 },
+  { id: 'settings' as const, label: 'nav.settings', icon: Settings },
 ];
 
 // 各视图内容区的手柄焦点组（视图切换时把焦点落进对应内容）
@@ -57,6 +59,7 @@ function NavPill({ label, icon: Icon, index, active, onClick }: {
 }
 
 export default function App() {
+  const t = useT();
   // 逐字段订阅：无 selector 的 useAppStore() 会订阅整个 store，任一字段变都重渲染。
   // App 是根组件，音乐播放时 nowPlaying.positionMs 每秒变一次会带着整棵树重画
   const activeView = useAppStore((s) => s.activeView);
@@ -143,9 +146,10 @@ export default function App() {
     }
   }, [hiddenLibraries, activeView, visibleNav]);
 
-  // 启动时读回持久化的界面偏好（游戏库列数等）
+  // 启动时读回持久化的界面偏好（游戏库列数等）+ 按数据库校正语言
   useEffect(() => {
     void useAppStore.getState().loadPreferences();
+    void initLang();
   }, []);
 
   // 启动预加载：各库数据常驻 store 后再让用户切页。
@@ -331,14 +335,14 @@ export default function App() {
         <button
           onClick={handleMinimize}
           className="w-10 h-10 rounded-xl flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-bg-surface-active transition-all"
-          title="最小化"
+          title={t('app.minimize')}
         >
           <Minus size={18} />
         </button>
         <button
           onClick={handleClose}
           className="w-10 h-10 rounded-xl flex items-center justify-center text-text-secondary hover:text-red-400 hover:bg-red-500/15 transition-all"
-          title="最小化到系统托盘（右键托盘图标可退出）"
+          title={t('app.closeToTray')}
         >
           <X size={18} />
         </button>
@@ -365,7 +369,7 @@ export default function App() {
             {visibleNav.map((item, i) => (
               <NavPill
                 key={item.id}
-                label={item.label}
+                label={t(item.label)}
                 icon={item.icon}
                 index={i}
                 active={activeView === item.id}

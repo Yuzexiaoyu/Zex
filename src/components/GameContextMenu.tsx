@@ -7,6 +7,7 @@ import { message } from '@tauri-apps/plugin-dialog';
 import { Play, Info, Trash2, ImagePlus, RectangleHorizontal, HardDrive, FolderOpen } from 'lucide-react';
 import type { Game } from '../types';
 import { useFocusIndex, useModalGamepad } from '../gamepad';
+import { useT } from '../i18n';
 
 interface Props {
   game: Game;
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export default function GameContextMenu({ game, x, y, onClose, onChangeCover, onChangeBanner, onDiskManage }: Props) {
+  const t = useT();
   const deleteGame = useAppStore((s) => s.deleteGame);
   const launchGame = useAppStore((s) => s.launchGame);
   const setSelectedGameId = useAppStore((s) => s.setSelectedGameId);
@@ -79,8 +81,8 @@ export default function GameContextMenu({ game, x, y, onClose, onChangeCover, on
     onClose();
     const target = game.install_dir || game.exe_path;
     void api.openPath(target).catch((e: any) => {
-      void message(`打开失败：${typeof e === 'string' ? e : (e?.message ?? String(e))}`, {
-        title: '浏览本地文件',
+      void message(t('games.openFailed', { msg: typeof e === 'string' ? e : (e?.message ?? String(e)) }), {
+        title: t('games.browseFiles'),
         kind: 'error',
       });
     });
@@ -93,7 +95,7 @@ export default function GameContextMenu({ game, x, y, onClose, onChangeCover, on
   };
 
   const handleDelete = async () => {
-    if (!confirm(`确定要删除 "${game.name}" 吗？`)) return;
+    if (!confirm(t('games.deleteConfirm', { name: game.name }))) return;
     await deleteGame(game.id);
     onClose();
   };
@@ -108,32 +110,32 @@ export default function GameContextMenu({ game, x, y, onClose, onChangeCover, on
       <div className="glass-card w-44 py-1.5 animate-scale-in">
         <button onClick={handleLaunch} className={clsx('context-menu-item', focused === 0 && 'gamepad-focus')}>
           <Play size={14} className="text-[#00d4ff]" fill="currentColor" />
-          启动游戏
+          {t('games.launch')}
         </button>
         <button onClick={handleDetail} className={clsx('context-menu-item', focused === 1 && 'gamepad-focus')}>
           <Info size={14} className="text-text-secondary" />
-          查看详情
+          {t('games.viewDetail')}
         </button>
         <button onClick={handleChangeCover} className={clsx('context-menu-item', focused === 2 && 'gamepad-focus')}>
           <ImagePlus size={14} className="text-text-secondary" />
-          更换主封面
+          {t('games.changeCover')}
         </button>
         <button onClick={handleChangeBanner} className={clsx('context-menu-item', focused === 3 && 'gamepad-focus')}>
           <RectangleHorizontal size={14} className="text-text-secondary" />
-          更换悬停封面
+          {t('games.changeBanner')}
         </button>
         <button onClick={handleBrowseFiles} className={clsx('context-menu-item', focused === 4 && 'gamepad-focus')}>
           <FolderOpen size={14} className="text-text-secondary" />
-          浏览本地文件
+          {t('games.browseFiles')}
         </button>
         <button onClick={handleDiskManage} className={clsx('context-menu-item', focused === 5 && 'gamepad-focus')}>
           <HardDrive size={14} className="text-text-secondary" />
-          磁盘管理
+          {t('games.diskManage')}
         </button>
         <div className="context-menu-divider" />
         <button onClick={handleDelete} className={clsx('context-menu-item text-danger', focused === 6 && 'gamepad-focus')}>
           <Trash2 size={14} />
-          删除游戏
+          {t('games.deleteGame')}
         </button>
       </div>
     </div>,

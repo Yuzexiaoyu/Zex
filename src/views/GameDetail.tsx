@@ -8,6 +8,7 @@ import type { Game } from '../types';
 import { formatDuration } from '../utils/media';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useFocusStore, useGamepadGroup, useFocusIndex, useRightStickScroll } from '../gamepad';
+import { useT, useLang } from '../i18n';
 import {
   X, Play, Pencil, Trash2, Gamepad2, FolderOpen
 } from 'lucide-react';
@@ -17,9 +18,9 @@ interface Props {
   onClose: () => void;
 }
 
-function formatDate(iso: string): string {
+function formatDate(iso: string, locale: string): string {
   if (!iso) return '-';
-  return new Date(iso).toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' });
+  return new Date(iso).toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 // 详情弹出窗口：仅通过右键菜单「查看详情」进入（点击卡片不再打开）
@@ -27,6 +28,8 @@ function formatDate(iso: string): string {
 // 竖版封面卡与网格同源，是窗口唯一的图；其余全部退到玻璃上。
 // 全窗口唯一的高饱和元素只有亮青色的「启动游戏」。
 export default function GameDetail({ gameId, onClose }: Props) {
+  const t = useT();
+  const lang = useLang();
   const games = useAppStore((s) => s.games);
   const updateGame = useAppStore((s) => s.updateGame);
   const deleteGame = useAppStore((s) => s.deleteGame);
@@ -101,7 +104,7 @@ export default function GameDetail({ gameId, onClose }: Props) {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: '可执行文件', extensions: ['exe'] }],
+        filters: [{ name: t('games.exeFilter'), extensions: ['exe'] }],
       });
       if (selected && typeof selected === 'string') {
         setForm({ ...form, exe_path: selected });
@@ -119,7 +122,7 @@ export default function GameDetail({ gameId, onClose }: Props) {
       const dirNorm = dir.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
       const exeNorm = exe.replace(/\\/g, '/').toLowerCase();
       if (!exeNorm.startsWith(dirNorm + '/')) {
-        await message('启动程序不在该安装目录内。安装目录应填写「包含启动程序在内的整个游戏文件夹」', { title: '无法保存', kind: 'warning' });
+        await message(t('games.dirMismatch'), { title: t('games.cannotSave'), kind: 'warning' });
         return;
       }
     }
@@ -129,19 +132,19 @@ export default function GameDetail({ gameId, onClose }: Props) {
       setEditing(false);
     } catch (err: any) {
       // 失败必须提示：无 catch 的话按钮复位但用户以为保存成功了，下次打开才发现没生效
-      await message(`保存失败：${typeof err === 'string' ? err : (err?.message ?? String(err))}`, { title: '错误', kind: 'error' });
+      await message(t('common.saveFailed', { msg: typeof err === 'string' ? err : (err?.message ?? String(err)) }), { title: t('common.error'), kind: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`确定要删除 "${game.name}" 吗？`)) return;
+    if (!confirm(t('games.deleteConfirm', { name: game.name }))) return;
     setDeleting(true);
     try {
       await deleteGame(gameId); // store 会清空 selectedGameId，窗口自动关闭
     } catch (err: any) {
-      await message(`删除失败：${typeof err === 'string' ? err : (err?.message ?? String(err))}`, { title: '错误', kind: 'error' });
+      await message(t('games.deleteFailed', { msg: typeof err === 'string' ? err : (err?.message ?? String(err)) }), { title: t('common.error'), kind: 'error' });
     } finally {
       setDeleting(false);
     }
@@ -151,7 +154,7 @@ export default function GameDetail({ gameId, onClose }: Props) {
     try {
       await launchGame(gameId);
     } catch (err: any) {
-      await message(`启动失败：${typeof err === 'string' ? err : (err?.message ?? String(err))}`, { title: '错误', kind: 'error' });
+      await message(t('games.launchFailed', { msg: typeof err === 'string' ? err : (err?.message ?? String(err)) }), { title: t('common.error'), kind: 'error' });
     }
   };
 
@@ -196,9 +199,9 @@ export default function GameDetail({ gameId, onClose }: Props) {
             <div className="flex-1 min-w-0 pt-1.5">
               <h2 className="text-xl font-bold leading-snug text-text-primary line-clamp-2 mb-1.5">{game.name}</h2>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary tabular-nums">
-                <span>{game.total_seconds > 0 ? `已玩 ${formatDuration(game.total_seconds)}` : '未游玩'}</span>
+                <span>{game.total_seconds > 0 ? t('games.playedTime', { time: formatDuration(game.total_seconds) }) : t('games.notPlayed')}</span>
                 <span className="text-text-tertiary">·</span>
-                <span>添加于 {formatDate(game.created_at)}</span>
+                <span>{t('games.addedOn', { date: formatDate(game.created_at, lang === 'zh' ? 'zh-CN' : 'en-US') })}</span>
               </div>
             </div>
           </div>
@@ -210,7 +213,7 @@ export default function GameDetail({ gameId, onClose }: Props) {
               className={clsx('w-full btn btn-accent py-3 text-sm font-semibold mb-3', detailFocused === 0 && 'gamepad-focus')}
             >
               <Play size={16} fill="currentColor" />
-              启动游戏
+              {t('games.launch')}
             </button>
 
             <button
@@ -218,62 +221,62 @@ export default function GameDetail({ gameId, onClose }: Props) {
               className={clsx('w-full btn btn-ghost py-2 text-sm mb-2', detailFocused === 1 && 'gamepad-focus')}
             >
               <Pencil size={14} />
-              {editing ? '取消编辑' : '编辑信息'}
+              {editing ? t('games.cancelEdit') : t('games.editInfo')}
             </button>
 
             {/* Edit form */}
             {editing && (
               <div className="glass-card p-4 mb-2 space-y-3 animate-fade-up">
                 <label className="block text-xs text-text-secondary">
-                  安装目录
+                  {t('games.installDir')}
                   <div className="flex gap-1.5 mt-1">
                     <input
                       type="text"
                       value={form.install_dir || ''}
                       onChange={(e) => setForm({ ...form, install_dir: e.target.value })}
                       className="input text-sm flex-1 min-w-0"
-                      placeholder="游戏整个文件夹（磁盘管理移动游戏的前提）"
+                      placeholder={t('games.installDirPlaceholder')}
                     />
                     <button
                       type="button"
                       onClick={handleBrowseInstallDir}
                       className="shrink-0 h-9 px-3 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.25)] hover:bg-[rgba(0,212,255,0.22)] flex items-center gap-1.5 text-xs text-[#00d4ff] transition-all"
-                      title="浏览选择安装目录"
+                      title={t('games.browseInstallDirTitle')}
                     >
                       <FolderOpen size={13} />
-                      浏览
+                      {t('common.browse')}
                     </button>
                   </div>
                 </label>
                 <label className="block text-xs text-text-secondary">
-                  启动程序
+                  {t('games.exePath')}
                   <div className="flex gap-1.5 mt-1">
                     <input
                       type="text"
                       value={form.exe_path || ''}
                       onChange={(e) => setForm({ ...form, exe_path: e.target.value })}
                       className="input text-sm flex-1 min-w-0"
-                      placeholder="如 D:\\Games\\MyGame\\game.exe"
+                      placeholder={t('games.exePlaceholderDetail')}
                     />
                     <button
                       type="button"
                       onClick={handleBrowseExe}
                       className="shrink-0 h-9 px-3 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.25)] hover:bg-[rgba(0,212,255,0.22)] flex items-center gap-1.5 text-xs text-[#00d4ff] transition-all"
-                      title="浏览选择启动程序"
+                      title={t('games.browseExeTitle')}
                     >
                       <FolderOpen size={13} />
-                      浏览
+                      {t('common.browse')}
                     </button>
                   </div>
                 </label>
                 <label className="block text-xs text-text-secondary">
-                  启动参数
+                  {t('games.launchArgs')}
                   <input
                     type="text"
                     value={form.launch_args || ''}
                     onChange={(e) => setForm({ ...form, launch_args: e.target.value })}
                     className="input mt-1 text-sm"
-                    placeholder="如 -applaunch 730"
+                    placeholder={t('games.launchArgsDetailPlaceholder')}
                   />
                 </label>
                 <button
@@ -281,7 +284,7 @@ export default function GameDetail({ gameId, onClose }: Props) {
                   disabled={loading}
                   className="w-full btn btn-accent py-2.5 text-sm"
                 >
-                  {loading ? '保存中...' : '保存'}
+                  {loading ? t('common.saving') : t('common.save')}
                 </button>
               </div>
             )}
@@ -292,25 +295,25 @@ export default function GameDetail({ gameId, onClose }: Props) {
             <div className="flex flex-col">
 
               <div className="space-y-2.5 mb-6">
-                <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider mb-3">详情</h3>
+                <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider mb-3">{t('games.details')}</h3>
 
                 {game.exe_path && (
                   <div className="grid grid-cols-[64px_1fr] gap-x-4 text-xs leading-relaxed">
-                    <span className="text-text-tertiary">启动路径</span>
+                    <span className="text-text-tertiary">{t('games.launchPath')}</span>
                     <span className="text-text-secondary/80 truncate" title={game.exe_path}>{game.exe_path}</span>
                   </div>
                 )}
 
                 {game.launch_args && (
                   <div className="grid grid-cols-[64px_1fr] gap-x-4 text-xs leading-relaxed">
-                    <span className="text-text-tertiary">启动参数</span>
+                    <span className="text-text-tertiary">{t('games.launchArgs')}</span>
                     <span className="text-text-secondary/80 break-words">{game.launch_args}</span>
                   </div>
                 )}
 
                 {tags.length > 0 && (
                   <div className="flex items-start gap-x-4 text-xs">
-                    <span className="text-text-tertiary w-16 shrink-0">标签</span>
+                    <span className="text-text-tertiary w-16 shrink-0">{t('games.tagsLabel')}</span>
                     <div className="flex flex-wrap gap-1.5">
                       {tags.map((tag) => (
                         <span key={tag} className="badge">{tag}</span>
@@ -327,7 +330,7 @@ export default function GameDetail({ gameId, onClose }: Props) {
                 className={clsx('w-full btn py-2 text-sm text-danger/70 hover:text-danger', detailFocused === 2 && 'gamepad-focus')}
               >
                 <Trash2 size={14} />
-                {deleting ? '删除中...' : '删除游戏'}
+                {deleting ? t('games.deleting') : t('games.deleteGame')}
               </button>
             </div>
           </div>

@@ -5,6 +5,7 @@ import { scanMusicPaths, importMusicTracks } from '../api';
 import type { TrackPreview } from '../types';
 import { useModalGamepad } from '../gamepad';
 import { clsx } from 'clsx';
+import { useT } from '../i18n';
 
 interface AddMusicModalProps {
   onClose: () => void;
@@ -22,6 +23,7 @@ function fmtTime(s: number): string {
 }
 
 export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps) {
+  const t = useT();
   const [mode, setMode] = useState<AddMode>('folder');
   const [previews, setPreviews] = useState<TrackPreview[]>([]);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -48,7 +50,7 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
           applyPreviews(await scanMusicPaths([selected]));
         } catch (err) {
           console.error('扫描音乐文件夹失败:', err);
-          alert('扫描失败，请检查文件夹路径');
+          alert(t('music.scanFailedFolder'));
         } finally {
           setIsScanning(false);
         }
@@ -62,7 +64,7 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
     try {
       const selected = await open({
         multiple: true,
-        filters: [{ name: '音频文件', extensions: MUSIC_EXTS }],
+        filters: [{ name: t('music.audioFilter'), extensions: MUSIC_EXTS }],
       });
       if (selected && Array.isArray(selected) && selected.length > 0) {
         setIsScanning(true);
@@ -70,7 +72,7 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
           applyPreviews(await scanMusicPaths(selected));
         } catch (err) {
           console.error('解析音乐文件失败:', err);
-          alert('解析失败，请检查文件是否损坏');
+          alert(t('music.scanFailedFiles'));
         } finally {
           setIsScanning(false);
         }
@@ -102,7 +104,7 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
       onClose();
     } catch (err) {
       console.error('导入音乐失败:', err);
-      alert('导入失败，请重试');
+      alert(t('music.importFailedRetry'));
     } finally {
       setIsSubmitting(false);
     }
@@ -121,12 +123,12 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
             <div className="w-9 h-9 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.2)] flex items-center justify-center">
               <Music size={18} className="text-[#00d4ff]" />
             </div>
-            <h2 className="text-lg font-bold">添加音乐</h2>
+            <h2 className="text-lg font-bold">{t('music.addMusic')}</h2>
           </div>
           <button
             onClick={onClose}
             className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-white hover:bg-bg-surface-active transition-all"
-            title="关闭"
+            title={t('common.close')}
           >
             <X size={18} />
           </button>
@@ -136,8 +138,8 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
           {/* 模式选择 */}
           <div className="flex gap-3">
             {([
-              { key: 'folder' as const, icon: Folder, label: '扫描文件夹' },
-              { key: 'files' as const, icon: FileAudio, label: '选择文件' },
+              { key: 'folder' as const, icon: Folder, label: 'music.scanFolder' },
+              { key: 'files' as const, icon: FileAudio, label: 'music.selectFiles' },
             ]).map(({ key, icon: Icon, label }) => (
               <button
                 key={key}
@@ -148,7 +150,7 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
                   : 'bg-bg-surface border-border-glass text-text-secondary hover:border-border-glass-hover hover:text-text-primary')}
               >
                 <Icon size={16} />
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
@@ -156,7 +158,7 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
           {/* 选择入口 */}
           <div>
             <label className="block text-xs text-text-secondary mb-1.5">
-              {mode === 'folder' ? '选择音乐文件夹（会递归扫描所有子文件夹）' : '选择一个或多个音频文件'}
+              {mode === 'folder' ? t('music.folderHint') : t('music.filesHint')}
             </label>
             <button
               type="button"
@@ -164,11 +166,11 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
               disabled={isScanning}
               className="flex-shrink-0 px-4 py-3 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.2)] hover:bg-[rgba(0,212,255,0.2)] flex items-center justify-center gap-2 text-sm text-[#00d4ff] transition-all disabled:opacity-50"
             >
-              {isScanning ? (<><Loader2 size={16} className="animate-spin" /> 扫描中...</>) : (<><Folder size={16} /> {mode === 'folder' ? '选择文件夹' : '选择文件'}</>)}
+              {isScanning ? (<><Loader2 size={16} className="animate-spin" /> {t('music.scanning')}</>) : (<><Folder size={16} /> {mode === 'folder' ? t('music.pickFolder') : t('music.selectFiles')}</>)}
             </button>
             {folderName && mode === 'folder' && (
               <p className="mt-2 text-xs text-[#00d4ff]">
-                ✓ 已扫描文件夹：{folderName}
+                {t('music.scannedFolder', { folder: folderName })}
               </p>
             )}
           </div>
@@ -178,7 +180,7 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <p className="text-xs text-text-secondary">
-                  共解析 <b className="text-text-primary">{previews.length}</b> 首，其中 <b className="text-[#00d4ff]">{newCount}</b> 首新曲
+                  {t('music.parsePrefix')} <b className="text-text-primary">{previews.length}</b> {t('music.parseMid')} <b className="text-[#00d4ff]">{newCount}</b> {t('music.parseNew')}
                 </p>
                 <button
                   type="button"
@@ -186,7 +188,7 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
                   className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-[#00d4ff] transition-colors"
                 >
                   {checked.size === previews.length ? <CheckSquare size={14} /> : <Square size={14} />}
-                  {checked.size === previews.length ? '取消全选' : '全选'}
+                  {checked.size === previews.length ? t('music.deselectAll') : t('music.selectAll')}
                 </button>
               </div>
               <div className="max-h-72 overflow-y-auto rounded-xl border border-border-glass divide-y divide-border-glass bg-bg-surface">
@@ -204,9 +206,9 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
                       </button>
                       <div className="flex-1 min-w-0">
                         <p className="truncate text-sm font-medium text-text-primary">{p.title}</p>
-                        <p className="truncate text-xs text-text-secondary">{(p.artist || '未知歌手')}{p.album ? ` · ${p.album}` : ''}</p>
+                        <p className="truncate text-xs text-text-secondary">{(p.artist || t('music.unknownArtist'))}{p.album ? ` · ${p.album}` : ''}</p>
                       </div>
-                      {p.already_exists && <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-bg-surface-active text-text-tertiary">已在库中</span>}
+                      {p.already_exists && <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-bg-surface-active text-text-tertiary">{t('music.alreadyInLibrary')}</span>}
                       <span className="shrink-0 text-xs text-text-tertiary tabular-nums">{fmtTime(p.duration_seconds)}</span>
                     </div>
                   );
@@ -223,7 +225,7 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
               disabled={isSubmitting}
               className="flex-1 btn btn-ghost py-3 px-6 text-sm"
             >
-              取消
+              {t('common.cancel')}
             </button>
             <button
               type="button"
@@ -231,7 +233,7 @@ export default function AddMusicModal({ onClose, onSuccess }: AddMusicModalProps
               disabled={isSubmitting || selectedCount === 0 || previews.length === 0}
               className="flex-1 btn btn-accent py-3 px-6 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSubmitting ? '导入中...' : `导入 ${selectedCount} 首`}
+              {isSubmitting ? t('music.importing') : t('music.importCount', { n: selectedCount })}
             </button>
           </div>
         </div>

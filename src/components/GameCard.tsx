@@ -5,6 +5,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { EyeOff, Play, Clock, Gamepad2 } from 'lucide-react';
 import type { Game } from '../types';
 import { useInputMode } from '../gamepad';
+import { useT } from '../i18n';
 
 interface Props {
   game: Game;
@@ -31,6 +32,7 @@ function formatTime(seconds: number): string {
 }
 
 export default function GameCard({ game, onClick, onLaunch, onContextMenu, onPointerDown, dragging, animationDelay = 0, previewDisabled = false, focused = false }: Props) {
+  const t = useT();
   const cardRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   // bottom 记录被悬停卡片的底边：预览卡放不下时改为底部对齐卡片，而不是贴窗口底部。
@@ -153,7 +155,7 @@ export default function GameCard({ game, onClick, onLaunch, onContextMenu, onPoi
                 className="btn btn-accent gap-2 py-3 px-6 text-sm"
               >
                 <Play size={16} fill="currentColor" />
-                启动游戏
+                {t('games.launch')}
               </button>
             </div>
           </div>
@@ -193,12 +195,12 @@ export default function GameCard({ game, onClick, onLaunch, onContextMenu, onPoi
             ) : (
               <div className="game-preview-banner game-preview-placeholder">
                 <Gamepad2 size={28} className="text-text-tertiary" />
-                <span className="text-[11px] text-text-tertiary">暂无横屏封面</span>
+                <span className="text-[11px] text-text-tertiary">{t('games.noBanner')}</span>
               </div>
             )}
             <div className="flex items-center gap-1.5 text-sm text-text-secondary mt-3">
               <Clock size={14} />
-              {game.total_seconds > 0 ? formatTime(game.total_seconds) : '未游玩'}
+              {game.total_seconds > 0 ? formatTime(game.total_seconds) : t('games.notPlayed')}
             </div>
           </div>
         </div>,

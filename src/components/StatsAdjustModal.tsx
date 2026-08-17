@@ -4,6 +4,7 @@ import { useModalGamepad } from '../gamepad';
 import { setGameSeconds } from '../api';
 import type { TopEntry } from '../types';
 import { longDur } from './StatsCovers';
+import { useT } from '../i18n';
 
 // 手工修正时长的上限（小时）：防止误输把字段撑爆
 const MAX_HOURS = 99999;
@@ -23,6 +24,7 @@ function digits(v: string): string {
  *  弹窗骨架与样式对齐 AddSeriesModal（遮罩 + glass-modal + btn-accent 按钮组）；
  *  手柄走屏蔽模式 —— 与既有表单弹窗一致，仅保证按键不穿透、B/Esc 可关闭 */
 export default function StatsAdjustModal({ entry, onClose, onSaved }: Props) {
+  const t = useT();
   const [hours, setHours] = useState(() => String(Math.floor(entry.seconds / 3600)));
   const [minutes, setMinutes] = useState(() => String(Math.floor((entry.seconds % 3600) / 60)));
   const [saving, setSaving] = useState(false);
@@ -44,7 +46,7 @@ export default function StatsAdjustModal({ entry, onClose, onSaved }: Props) {
     const h = Number(hours || 0);
     const m = Number(minutes || 0);
     if (h > MAX_HOURS) {
-      alert(`请输入不超过 ${MAX_HOURS} 小时的时长`);
+      alert(t('stats.hoursLimit', { n: MAX_HOURS }));
       return;
     }
     const seconds = h * 3600 + m * 60;
@@ -54,7 +56,7 @@ export default function StatsAdjustModal({ entry, onClose, onSaved }: Props) {
       onSaved();
     } catch (err) {
       // 游戏在弹窗期间被删：后端 UPDATE 影响 0 行返回错误，提示并强制刷新
-      alert(typeof err === 'string' ? err : '保存失败，请重试');
+      alert(typeof err === 'string' ? err : t('stats.saveFailedRetry'));
       onSaved();
     } finally {
       setSaving(false);
@@ -72,14 +74,14 @@ export default function StatsAdjustModal({ entry, onClose, onSaved }: Props) {
               <Gamepad2 size={18} className="text-[#00d4ff]" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-lg font-bold leading-tight">调整游戏时长</h2>
+              <h2 className="text-lg font-bold leading-tight">{t('stats.adjustGameTitle')}</h2>
               <p className="text-xs text-text-secondary truncate" title={entry.name}>{entry.name}</p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-white hover:bg-bg-surface-active transition-all shrink-0"
-            title="关闭"
+            title={t('common.close')}
           >
             <X size={18} />
           </button>
@@ -89,13 +91,13 @@ export default function StatsAdjustModal({ entry, onClose, onSaved }: Props) {
           {/* 当前时长提示 */}
           <div className="flex items-center gap-2 text-sm text-text-secondary">
             <Clock size={14} className="text-[#00d4ff]" />
-            当前时长：<span className="text-[#00d4ff] font-semibold">{longDur(entry.seconds)}</span>
+            {t('stats.currentDuration')}<span className="text-[#00d4ff] font-semibold">{longDur(entry.seconds)}</span>
           </div>
 
           {/* 小时 / 分钟 */}
           <div className="flex items-end gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-text-secondary mb-1.5">小时</label>
+              <label className="block text-xs text-text-secondary mb-1.5">{t('stats.hours')}</label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -107,7 +109,7 @@ export default function StatsAdjustModal({ entry, onClose, onSaved }: Props) {
               />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-text-secondary mb-1.5">分钟</label>
+              <label className="block text-xs text-text-secondary mb-1.5">{t('stats.minutes')}</label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -121,14 +123,14 @@ export default function StatsAdjustModal({ entry, onClose, onSaved }: Props) {
 
           {/* 实时预览：输入即换算（如 90 分钟自动进位成 1 小时 30 分） */}
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-text-secondary">设置后：</span>
+            <span className="text-text-secondary">{t('stats.afterSet')}</span>
             <span className="text-[#00d4ff] font-semibold">
               {previewSeconds >= 3600
-                ? `${Math.floor(previewSeconds / 3600)} 小时 ${Math.floor((previewSeconds % 3600) / 60)} 分`
-                : `${Math.floor(previewSeconds / 60)} 分钟`}
+                ? t('common.duration.hoursMinutes', { h: Math.floor(previewSeconds / 3600), m: Math.floor((previewSeconds % 3600) / 60) })
+                : t('common.duration.minutes', { n: Math.floor(previewSeconds / 60) })}
             </span>
           </div>
-          <p className="text-xs text-text-tertiary">手动修正累计时长，下次游玩后增量照常累加</p>
+          <p className="text-xs text-text-tertiary">{t('stats.adjustHint')}</p>
 
           {/* 按钮 */}
           <div className="flex gap-4 pt-2">
@@ -138,14 +140,14 @@ export default function StatsAdjustModal({ entry, onClose, onSaved }: Props) {
               disabled={saving}
               className="flex-1 btn btn-ghost py-3 px-6 text-sm"
             >
-              取消
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={saving}
               className="flex-1 btn btn-accent py-3 px-6 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {saving ? '保存中...' : '保存'}
+              {saving ? t('common.saving') : t('common.save')}
             </button>
           </div>
         </form>

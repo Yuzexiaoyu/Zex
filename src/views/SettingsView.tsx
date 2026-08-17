@@ -1,15 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
-import { Settings as SettingsIcon, Sun, Moon, Monitor, MonitorPlay, FolderOpen, Download, Upload, ExternalLink, KeyRound, Trash2, Loader2, Minus, Plus, Cpu, AlertTriangle, Gamepad2, X, Power, Image as ImageIcon } from 'lucide-react';
+import { Settings as SettingsIcon, Sun, Moon, Monitor, MonitorPlay, FolderOpen, Download, Upload, ExternalLink, KeyRound, Trash2, Loader2, Minus, Plus, Cpu, AlertTriangle, Gamepad2, X, Power, Image as ImageIcon, Languages } from 'lucide-react';
 import zexLogo from '../assets/zex-logo.png';
 import { coverSrc } from '../utils/media';
 import { clsx } from 'clsx';
 import * as api from '../api';
 import { message, save, open } from '@tauri-apps/plugin-dialog';
 import { useAppStore, MIN_GAME_COLUMNS, MAX_GAME_COLUMNS } from '../store';
+import { useLang, useT, setLang, LANGUAGES } from '../i18n';
 import { setGamepadEnabled, isGamepadEnabled, useGamepadGroup, useFocusIndex, useRightStickScroll, useModalGamepad, getConnectedPads, onConnectedChange } from '../gamepad';
 import type { ConnectedPad } from '../gamepad';
 
 export default function SettingsView() {
+  // 语言：订阅 i18n 状态（chips 激活态 + 切换即时生效）
+  const lang = useLang();
+  const t = useT();
   // 逐字段订阅：设置页整页较重，不该跟着音乐进度等无关字段重画
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
@@ -48,6 +52,7 @@ export default function SettingsView() {
   const [fetchingCovers, setFetchingCovers] = useState(false);
   const [fetchProgress, setFetchProgress] = useState<{ done: number; total: number; ok: number; fail: number } | null>(null);
   const [fetchResult, setFetchResult] = useState<string | null>(null); // 完成结果（内联显示，不弹窗）
+  const [fetchFailed, setFetchFailed] = useState(false); // 失败标红（结果文案已词条化，不能再用前缀判断）
   // 手柄支持：开关 + 连接状态（品牌/数量，随插拔实时刷新）
   const [gamepadEnabled, setGamepadEnabledState] = useState(isGamepadEnabled());
   const [pads, setPads] = useState<ConnectedPad[]>(getConnectedPads());
@@ -110,7 +115,7 @@ export default function SettingsView() {
     setGamepadEnabledState(v);
     setGamepadEnabled(v);
     void api.setSetting('gamepad_enabled', v ? '1' : '0').catch((err: any) => {
-      void message(`保存失败: ${err.message}`, { title: '错误', kind: 'error' });
+      void message(t('common.saveFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     });
   };
 
@@ -120,11 +125,11 @@ export default function SettingsView() {
     setGuideBtn(v);
     void api.setGuideButtonEnabled(v).then((regOk) => {
       if (!regOk) {
-        void message('设置已保存，但注册表写入失败：Game Bar 可能仍会抢占西瓜键，请稍后重试', { title: '警告', kind: 'warning' });
+        void message(t('settings.guideRegFail'), { title: t('common.warning'), kind: 'warning' });
       }
     }).catch((err: any) => {
       setGuideBtn(!v); // 保存失败回滚
-      void message(`保存失败: ${err.message}`, { title: '错误', kind: 'error' });
+      void message(t('common.saveFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     });
   };
 
@@ -133,7 +138,7 @@ export default function SettingsView() {
     setPsBtn(v);
     void api.setPsButtonEnabled(v).catch((err: any) => {
       setPsBtn(!v); // 保存失败回滚
-      void message(`保存失败: ${err.message}`, { title: '错误', kind: 'error' });
+      void message(t('common.saveFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     });
   };
 
@@ -145,13 +150,13 @@ export default function SettingsView() {
       if (!regOk) {
         setAutostartState(!v);
         void message(
-          v ? '注册表写入失败，开机自启未生效' : '注册表删除失败，开机自启仍生效',
-          { title: '警告', kind: 'warning' },
+          v ? t('settings.autostartRegOnFail') : t('settings.autostartRegOffFail'),
+          { title: t('common.warning'), kind: 'warning' },
         );
       }
     }).catch((err: any) => {
       setAutostartState(!v);
-      void message(`保存失败: ${err.message}`, { title: '错误', kind: 'error' });
+      void message(t('common.saveFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     });
   };
 
@@ -161,11 +166,11 @@ export default function SettingsView() {
     void api.setAutostart(true, v).then((regOk) => {
       if (!regOk) {
         setAutostartShow(!v);
-        void message('注册表写入失败，自启方式未生效', { title: '警告', kind: 'warning' });
+        void message(t('settings.autostartShowRegFail'), { title: t('common.warning'), kind: 'warning' });
       }
     }).catch((err: any) => {
       setAutostartShow(!v);
-      void message(`保存失败: ${err.message}`, { title: '错误', kind: 'error' });
+      void message(t('common.saveFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     });
   };
 
@@ -178,9 +183,9 @@ export default function SettingsView() {
   // ── 手柄：设置页整体行导航 ──────────────────────
   // 上下键在设置项行之间移动，左右键在行内 chips 间切换，A 触发按钮行
   const themeRows = [
-    { value: 'light' as const, icon: Sun, label: '浅色' },
-    { value: 'dark' as const, icon: Moon, label: '深色' },
-    { value: 'system' as const, icon: Monitor, label: '系统' },
+    { value: 'light' as const, icon: Sun, label: 'settings.themeLight' },
+    { value: 'dark' as const, icon: Moon, label: 'settings.themeDark' },
+    { value: 'system' as const, icon: Monitor, label: 'settings.themeSystem' },
   ];
 
   const focusedRow = useFocusIndex('settings:rows');
@@ -193,7 +198,7 @@ export default function SettingsView() {
   // 隐藏库：三个主库最多 2 个；统计页不占名额，可独立隐藏
   const tryHide = (id: 'games' | 'series' | 'music' | 'stats') => {
     if (id !== 'stats' && !hiddenLibraries.includes(id) && hiddenLibraries.filter((x) => x !== 'stats').length >= 2) {
-      void message('最多隐藏 2 个库，至少保留 1 个库可见', { title: '提示', kind: 'info' });
+      void message(t('settings.hideLimit'), { title: t('common.tip'), kind: 'info' });
       return;
     }
     setLibraryHidden(id, true);
@@ -215,6 +220,8 @@ export default function SettingsView() {
   // chips 的 set/onA 用箭头延迟调用，避免 TDZ
   const rows: SettingRow[] = [
     { chips: themeRows.map((t) => ({ active: () => theme === t.value, set: () => setTheme(t.value) })) },
+    // 语言（row 1）：中文 / English 两个 chip，手柄左右循环切换
+    { chips: LANGUAGES.map((l) => ({ active: () => lang === l.code, set: () => setLang(l.code) })) },
     { onLeftRight: (dir) => setGameColumns(gameColumns + (dir === 'right' ? 1 : -1)) },
     // 开机自启（2）+ 自启方式（3，仅自启开启时渲染，复用播放引擎的条件行模式）
     {
@@ -337,16 +344,18 @@ export default function SettingsView() {
     setFetchingCovers(true);
     setFetchProgress(null);
     setFetchResult(null);
+    setFetchFailed(false);
     try {
       const res = await api.fetchAllSteamCovers();
       await loadGames();
       setFetchResult(
         res.total === 0
-          ? '所有 Steam 游戏都已配置封面'
-          : `完成：共处理 ${res.total} 个游戏，成功 ${res.ok} 张，失败 ${res.fail} 张`,
+          ? t('settings.fetchAllDone')
+          : t('settings.fetchResult', { total: res.total, ok: res.ok, fail: res.fail }),
       );
     } catch (err: any) {
-      setFetchResult(`获取失败：${err.message}`);
+      setFetchResult(t('settings.fetchFailed', { msg: err.message }));
+      setFetchFailed(true);
     } finally {
       setFetchingCovers(false);
     }
@@ -356,9 +365,9 @@ export default function SettingsView() {
     setSavingKey(true);
     try {
       await api.setSetting('steamgriddb_api_key', sgdbKey.trim());
-      await message('已保存，下次 Steam 扫描导入时生效', { title: '保存成功', kind: 'info' });
+      await message(t('settings.sgdbSaved'), { title: t('common.success'), kind: 'info' });
     } catch (err: any) {
-      await message(`保存失败: ${err.message}`, { title: '错误', kind: 'error' });
+      await message(t('common.saveFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     } finally {
       setSavingKey(false);
     }
@@ -368,9 +377,9 @@ export default function SettingsView() {
     setSavingTmdbKey(true);
     try {
       await api.setSetting('tmdb_api_key', tmdbKey.trim());
-      await message('已保存，添加影视或右键自动获取封面时生效', { title: '保存成功', kind: 'info' });
+      await message(t('settings.tmdbSaved'), { title: t('common.success'), kind: 'info' });
     } catch (err: any) {
-      await message(`保存失败: ${err.message}`, { title: '错误', kind: 'error' });
+      await message(t('common.saveFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     } finally {
       setSavingTmdbKey(false);
     }
@@ -378,10 +387,10 @@ export default function SettingsView() {
 
   const handleBrowsePlayer = async () => {
     const picked = await open({
-      title: '选择播放器程序',
+      title: t('settings.pickPlayerTitle'),
       multiple: false,
       directory: false,
-      filters: [{ name: '程序', extensions: ['exe'] }],
+      filters: [{ name: t('settings.filterProgram'), extensions: ['exe'] }],
     });
     if (typeof picked === 'string') setPlayerPath(picked);
   };
@@ -389,7 +398,7 @@ export default function SettingsView() {
   // 播放设置即时保存：每次改动直接落库，不设保存按钮
   const savePlayerSetting = (key: string, value: string) => {
     void api.setSetting(key, value).catch((err: any) => {
-      void message(`保存失败: ${err.message}`, { title: '错误', kind: 'error' });
+      void message(t('common.saveFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     });
   };
 
@@ -426,13 +435,13 @@ export default function SettingsView() {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+        filters: [{ name: t('settings.filterImage'), extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
       });
       if (typeof selected !== 'string') return;
       const stored = await api.setBrandCover(selected);
       await saveBrandCover(stored);
     } catch (err) {
-      alert(typeof err === 'string' ? err : '更换封面失败，请检查图片格式与大小');
+      alert(typeof err === 'string' ? err : t('settings.coverPickFail'));
     }
   };
 
@@ -440,7 +449,7 @@ export default function SettingsView() {
     setExporting(true);
     try {
       const path = await save({
-        title: '导出数据',
+        title: t('settings.exportDialogTitle'),
         filters: [{ name: 'JSON', extensions: ['json'] }],
         defaultPath: 'zex-backup.json',
       });
@@ -448,9 +457,9 @@ export default function SettingsView() {
       const data = await api.exportData();
       const { writeTextFile } = await import('@tauri-apps/plugin-fs');
       await writeTextFile(path, data);
-      await message(`数据已导出到: ${path}`, { title: '导出成功', kind: 'info' });
+      await message(t('settings.exported', { path }), { title: t('common.success'), kind: 'info' });
     } catch (err: any) {
-      await message(`导出失败: ${err.message}`, { title: '错误', kind: 'error' });
+      await message(t('settings.exportFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     } finally {
       setExporting(false);
     }
@@ -460,7 +469,7 @@ export default function SettingsView() {
     setImporting(true);
     try {
       const path = await open({
-        title: '导入数据',
+        title: t('settings.importDialogTitle'),
         filters: [{ name: 'JSON', extensions: ['json'] }],
         multiple: false,
       });
@@ -470,9 +479,9 @@ export default function SettingsView() {
       await api.importData(data);
       // 导入会整库替换：四大库 + 歌单全部重拉，避免界面残留导入前的旧数据
       await Promise.all([loadGames(), loadSeries(), loadTracks(), loadPlaylists()]);
-      await message('数据导入成功！', { title: '成功', kind: 'info' });
+      await message(t('settings.imported'), { title: t('common.success'), kind: 'info' });
     } catch (err: any) {
-      await message(`导入失败: ${err.message}`, { title: '错误', kind: 'error' });
+      await message(t('settings.importFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     } finally {
       setImporting(false);
     }
@@ -489,9 +498,9 @@ export default function SettingsView() {
     try {
       await api.clearAllData();
       await Promise.all([loadGames(), loadSeries(), loadTracks(), loadPlaylists()]);
-      await message('所有数据已清除', { title: '成功', kind: 'info' });
+      await message(t('settings.cleared'), { title: t('common.success'), kind: 'info' });
     } catch (err: any) {
-      await message(`清除失败: ${err.message}`, { title: '错误', kind: 'error' });
+      await message(t('settings.clearFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     } finally {
       setClearing(false);
     }
@@ -503,19 +512,19 @@ export default function SettingsView() {
       <div className="px-5 py-4 max-w-4xl mx-auto">
       <h1 className="text-xl font-bold mb-5 flex items-center gap-2">
         <SettingsIcon size={22} className="text-[#00d4ff]" />
-        设置
+        {t('settings.title')}
       </h1>
 
       {/* Appearance */}
       <section className="mb-6">
-        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-3">外观</h2>
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-3">{t('settings.appearance')}</h2>
         <div className="glass-card overflow-hidden">
 
           {/* Theme */}
           <div className={clsx('flex items-center justify-between px-5 py-3', focusedRow === 0 && 'settings-row-focus')} data-settings-row={0}>
             <div>
-              <p className="text-sm font-medium mb-0.5">主题</p>
-              <p className="text-xs text-text-secondary">浅色 / 深色 / 跟随系统</p>
+              <p className="text-sm font-medium mb-0.5">{t('settings.theme')}</p>
+              <p className="text-xs text-text-secondary">{t('settings.themeDesc')}</p>
             </div>
             <div className="flex gap-2">
               {themeRows.map(({ value, icon: Icon, label }) => (
@@ -530,6 +539,31 @@ export default function SettingsView() {
                   )}
                 >
                   <Icon size={14} />
+                  {t(label)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 语言（row 1）：chips 手柄左右可切，切换立即生效并落库 */}
+          <div className={clsx('flex items-center justify-between px-5 py-3 border-t border-border-glass', focusedRow === 1 && 'settings-row-focus')} data-settings-row={1}>
+            <div>
+              <p className="text-sm font-medium mb-0.5">{t('settings.language')}</p>
+              <p className="text-xs text-text-secondary">{t('settings.languageDesc')}</p>
+            </div>
+            <div className="flex gap-2">
+              {LANGUAGES.map(({ code, label }) => (
+                <button
+                  key={code}
+                  onClick={() => setLang(code)}
+                  className={clsx(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-all',
+                    lang === code
+                      ? 'bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.3)] text-[#00d4ff]'
+                      : 'bg-bg-surface border border-transparent text-text-secondary hover:text-text-primary hover:bg-bg-surface-hover',
+                  )}
+                >
+                  <Languages size={14} />
                   {label}
                 </button>
               ))}
@@ -537,10 +571,10 @@ export default function SettingsView() {
           </div>
 
           {/* 游戏库每行数量 */}
-          <div className={clsx('flex items-center justify-between gap-4 px-6 py-5 border-t border-border-glass', focusedRow === 1 && 'settings-row-focus')} data-settings-row={1}>
+          <div className={clsx('flex items-center justify-between gap-4 px-6 py-5 border-t border-border-glass', focusedRow === 2 && 'settings-row-focus')} data-settings-row={2}>
             <div>
-              <p className="text-sm font-medium mb-0.5">游戏库每行数量</p>
-              <p className="text-xs text-text-secondary">调整封面网格的列数，拖动即时生效并自动记住</p>
+              <p className="text-sm font-medium mb-0.5">{t('settings.gameColumnsTitle')}</p>
+              <p className="text-xs text-text-secondary">{t('settings.gameColumnsDesc')}</p>
             </div>
             <div className="flex items-center gap-5 shrink-0">
               <div className="grid-size-row w-[180px]">
@@ -548,7 +582,7 @@ export default function SettingsView() {
                   className="grid-size-btn"
                   disabled={gameColumns <= MIN_GAME_COLUMNS}
                   onClick={() => setGameColumns(gameColumns - 1)}
-                  title="减少一列"
+                  title={t('settings.colMinus')}
                 >
                   <Minus size={13} />
                 </button>
@@ -569,7 +603,7 @@ export default function SettingsView() {
                   className="grid-size-btn"
                   disabled={gameColumns >= MAX_GAME_COLUMNS}
                   onClick={() => setGameColumns(gameColumns + 1)}
-                  title="增加一列"
+                  title={t('settings.colPlus')}
                 >
                   <Plus size={13} />
                 </button>
@@ -582,38 +616,37 @@ export default function SettingsView() {
 
       {/* 启动 */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">启动</h2>
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">{t('settings.sectionStartup')}</h2>
         <div className="glass-card overflow-hidden">
-          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5', focusedRow === 2 && 'settings-row-focus')} data-settings-row={2}>
+          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5', focusedRow === 3 && 'settings-row-focus')} data-settings-row={3}>
             <div className="pr-4">
               <p className="text-sm font-medium mb-0.5 flex items-center gap-2">
                 <Power size={14} className="text-text-tertiary" />
-                开机自启
+                {t('settings.autostart')}
               </p>
               <p className="text-xs text-text-secondary leading-relaxed">
-                登录 Windows 后自动启动 ZEX。驻留托盘时后台照常累计时长与预热播放器，
-                可用手柄 logo 键或托盘图标唤回（西瓜键 / PS 键需在「手柄」设置中开启）
+                {t('settings.autostartDesc')}
               </p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <button className={clsx('chip', !autostart && 'active')} onClick={() => switchAutostart(false)}>关</button>
-              <button className={clsx('chip', autostart && 'active')} onClick={() => switchAutostart(true)}>开</button>
+              <button className={clsx('chip', !autostart && 'active')} onClick={() => switchAutostart(false)}>{t('common.off')}</button>
+              <button className={clsx('chip', autostart && 'active')} onClick={() => switchAutostart(true)}>{t('common.on')}</button>
             </div>
           </div>
 
           {autostart && (
-            <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 3 && 'settings-row-focus')} data-settings-row={3}>
+            <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 4 && 'settings-row-focus')} data-settings-row={4}>
               <div className="pr-4">
-                <p className="text-sm font-medium mb-0.5">自启方式</p>
+                <p className="text-sm font-medium mb-0.5">{t('settings.autostartMethod')}</p>
                 <p className="text-xs text-text-secondary leading-relaxed">
                   {autostartShow
-                    ? '开机直接显示主窗口，与手动启动一致'
-                    : '驻留系统托盘不弹窗口，后台照常记录与预热；点托盘图标或按手柄 logo 键唤回'}
+                    ? t('settings.autostartShowDesc')
+                    : t('settings.autostartTrayDesc')}
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                <button className={clsx('chip', !autostartShow && 'active')} onClick={() => switchAutostartShow(false)}>驻留托盘</button>
-                <button className={clsx('chip', autostartShow && 'active')} onClick={() => switchAutostartShow(true)}>显示窗口</button>
+                <button className={clsx('chip', !autostartShow && 'active')} onClick={() => switchAutostartShow(false)}>{t('settings.autostartTray')}</button>
+                <button className={clsx('chip', autostartShow && 'active')} onClick={() => switchAutostartShow(true)}>{t('settings.autostartShow')}</button>
               </div>
             </div>
           )}
@@ -622,104 +655,100 @@ export default function SettingsView() {
 
       {/* Player */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">播放</h2>
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">{t('settings.sectionPlayback')}</h2>
         <div className="glass-card overflow-hidden">
-          <div className={clsx('px-5 pt-4 pb-3', focusedRow === 4 + rowOffset && 'settings-row-focus')} data-settings-row={4 + rowOffset}>
+          <div className={clsx('px-5 pt-4 pb-3', focusedRow === 5 + rowOffset && 'settings-row-focus')} data-settings-row={5 + rowOffset}>
             <div className="flex items-center gap-2.5 mb-2">
               <MonitorPlay size={15} className="text-[#00d4ff]" />
-              <p className="text-sm font-medium">播放引擎</p>
+              <p className="text-sm font-medium">{t('settings.engine')}</p>
             </div>
             <p className="text-xs text-text-secondary mb-2.5 leading-snug">
-              内置 mpv 随 ZEX 打包，MKV / HEVC / AV1 / DTS / TrueHD 与 ASS 字幕全支持，
-              启动即全屏，观看进度和累计时长由 ZEX 自动记录。外部播放器是黑盒，记不到进度。
+              {t('settings.engineDesc')}
             </p>
             <div className="flex items-center gap-1.5">
               <button className={clsx('chip', engine === 'mpv' && 'active')} onClick={() => switchEngine('mpv')}>
-                内置 mpv
+                {t('settings.engineMpv')}
               </button>
               <button className={clsx('chip', engine === 'external' && 'active')} onClick={() => switchEngine('external')}>
-                外部播放器
+                {t('settings.engineExternal')}
               </button>
             </div>
             {!mpvOk && (
               <p className="mt-3 flex items-start gap-2 text-xs text-[#ffc94d] leading-snug">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                没找到随包的 mpv，播放会自动回退到外部播放器。运行
+                {t('settings.mpvMissingPre')}{' '}
                 <code className="px-1 rounded bg-bg-surface-active">bash scripts/fetch-mpv.sh</code>
-                拉取后重新构建即可。
+                {' '}{t('settings.mpvMissingPost')}
               </p>
             )}
           </div>
 
           {engine === 'mpv' ? (
             <>
-              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 5 + rowOffset && 'settings-row-focus')} data-settings-row={5 + rowOffset}>
+              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 6 + rowOffset && 'settings-row-focus')} data-settings-row={6 + rowOffset}>
                 <div className="pr-4">
                   <p className="text-sm font-medium mb-0.5 flex items-center gap-2">
                     <Cpu size={14} className="text-text-tertiary" />
-                    硬件解码
+                    {t('settings.hwdec')}
                   </p>
                   <p className="text-xs text-text-secondary leading-snug">
-                    显卡解码，4K / HEVC 片源必开。个别老显卡驱动会花屏，遇到就关掉改用 CPU 解码
+                    {t('settings.hwdecDesc')}
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <button className={clsx('chip', !hwdec && 'active')} onClick={() => switchHwdec(false)}>关</button>
-                  <button className={clsx('chip', hwdec && 'active')} onClick={() => switchHwdec(true)}>开</button>
+                  <button className={clsx('chip', !hwdec && 'active')} onClick={() => switchHwdec(false)}>{t('common.off')}</button>
+                  <button className={clsx('chip', hwdec && 'active')} onClick={() => switchHwdec(true)}>{t('common.on')}</button>
                 </div>
               </div>
 
-              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 6 + rowOffset && 'settings-row-focus')} data-settings-row={6 + rowOffset}>
+              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 7 + rowOffset && 'settings-row-focus')} data-settings-row={7 + rowOffset}>
                 <div className="pr-4">
-                  <p className="text-sm font-medium mb-0.5">HDR / 杜比视界直通</p>
+                  <p className="text-sm font-medium mb-0.5">{t('settings.hdr')}</p>
                   <p className="text-xs text-text-secondary leading-relaxed">
-                    HDR10 / HDR10+ / HLG 直通，杜比视界 Profile 5 与 8 由 libplacebo 正确 tone map。
-                    Profile 7（UHD 原盘双层）会回落到 HDR10 基础层 —— PC 上没有播放器能做到完整 DV 输出。
-                    只在 HDR 片源上生效，SDR 不受影响
+                    {t('settings.hdrDesc')}
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <button className={clsx('chip', !hdr && 'active')} onClick={() => switchHdr(false)}>关</button>
-                  <button className={clsx('chip', hdr && 'active')} onClick={() => switchHdr(true)}>开</button>
+                  <button className={clsx('chip', !hdr && 'active')} onClick={() => switchHdr(false)}>{t('common.off')}</button>
+                  <button className={clsx('chip', hdr && 'active')} onClick={() => switchHdr(true)}>{t('common.on')}</button>
                 </div>
               </div>
             </>
           ) : (
             <>
-              <div className={clsx('px-6 py-5 border-t border-border-glass', focusedRow === 5 + rowOffset && 'settings-row-focus')} data-settings-row={5 + rowOffset}>
-                <p className="text-sm font-medium mb-0.5">播放器路径</p>
+              <div className={clsx('px-6 py-5 border-t border-border-glass', focusedRow === 6 + rowOffset && 'settings-row-focus')} data-settings-row={6 + rowOffset}>
+                <p className="text-sm font-medium mb-0.5">{t('settings.playerPath')}</p>
                 <p className="text-xs text-text-secondary mb-2 leading-snug">
-                  留空则交给系统默认关联程序打开。注意：走外部播放器时 ZEX 拿不到播放进度，
-                  「继续观看」和累计时长都不会更新
+                  {t('settings.playerPathDesc')}
                 </p>
                 <div className="flex gap-2">
                   <input
                     value={playerPath}
                     onChange={(e) => setPlayerPath(e.target.value)}
                     onBlur={savePlayerPath}
-                    placeholder="留空 = 系统默认程序，例：F:\Potplayer\PotPlayerMini64.exe"
+                    placeholder={t('settings.playerPathPlaceholder')}
                     className="input flex-1 text-sm"
                   />
                   <button onClick={handleBrowsePlayer} className="btn btn-glass gap-2 text-sm px-4 shrink-0">
                     <FolderOpen size={14} />
-                    浏览
+                    {t('settings.browse')}
                   </button>
                 </div>
               </div>
 
-              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 6 + rowOffset && 'settings-row-focus')} data-settings-row={6 + rowOffset}>
+              <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 7 + rowOffset && 'settings-row-focus')} data-settings-row={7 + rowOffset}>
                 <div className="pr-4">
-                  <p className="text-sm font-medium mb-0.5">全屏播放</p>
+                  <p className="text-sm font-medium mb-0.5">{t('settings.fullscreen')}</p>
                   <p className="text-xs text-text-secondary leading-relaxed">
-                    MPC-HC / VLC / mpv 用它们自己的命令行开关
+                    {t('settings.fullscreenDesc')}
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button className={clsx('chip', playerFullscreen && 'active')} onClick={() => switchFullscreen(true)}>
-                    全屏
+                    {t('settings.fullscreenOn')}
                   </button>
                   <button className={clsx('chip', !playerFullscreen && 'active')} onClick={() => switchFullscreen(false)}>
-                    窗口
+                    {t('settings.windowed')}
                   </button>
                 </div>
               </div>
@@ -727,17 +756,16 @@ export default function SettingsView() {
           )}
 
           {/* 播放音乐时默认显示歌词（恒渲染：音乐播放走内置 mpv，与影视引擎无关） */}
-          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 7 + rowOffset && 'settings-row-focus')} data-settings-row={7 + rowOffset}>
+          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 8 + rowOffset && 'settings-row-focus')} data-settings-row={8 + rowOffset}>
             <div className="pr-4">
-              <p className="text-sm font-medium mb-0.5">播放音乐时默认显示歌词</p>
+              <p className="text-sm font-medium mb-0.5">{t('settings.lyricsAutoShow')}</p>
               <p className="text-xs text-text-secondary leading-relaxed">
-                开启后播放音乐时自动显示桌面歌词；歌曲无内嵌同步歌词时自动跳过，
-                手动关闭后本次播放内不再弹出
+                {t('settings.lyricsAutoShowDesc')}
               </p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <button className={clsx('chip', !lyricsAutoShow && 'active')} onClick={() => switchLyricsAutoShow(false)}>关</button>
-              <button className={clsx('chip', lyricsAutoShow && 'active')} onClick={() => switchLyricsAutoShow(true)}>开</button>
+              <button className={clsx('chip', !lyricsAutoShow && 'active')} onClick={() => switchLyricsAutoShow(false)}>{t('common.off')}</button>
+              <button className={clsx('chip', lyricsAutoShow && 'active')} onClick={() => switchLyricsAutoShow(true)}>{t('common.on')}</button>
             </div>
           </div>
         </div>
@@ -745,59 +773,55 @@ export default function SettingsView() {
 
       {/* 手柄 */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">手柄</h2>
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">{t('settings.sectionGamepad')}</h2>
         <div className="glass-card overflow-hidden">
-          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5', focusedRow === 8 + rowOffset && 'settings-row-focus')} data-settings-row={8 + rowOffset}>
+          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5', focusedRow === 9 + rowOffset && 'settings-row-focus')} data-settings-row={9 + rowOffset}>
             <div>
               <p className="text-sm font-medium flex items-center gap-2">
                 <Gamepad2 size={14} className="text-text-tertiary" />
-                手柄支持
+                {t('settings.gamepadSupport')}
               </p>
               <p className="text-xs text-text-secondary mt-0.5 leading-snug">
-                支持 Xbox 系列与 PS5 DualSense / DualSense Edge（USB 有线）。
-                方向键 / 左摇杆导航，A/✕ 确认，B/○ 返回，LB/L1、RB/R1 循环切库
+                {t('settings.gamepadSupportDesc')}
               </p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <button className={clsx('chip', !gamepadEnabled && 'active')} onClick={() => switchGamepad(false)}>关</button>
-              <button className={clsx('chip', gamepadEnabled && 'active')} onClick={() => switchGamepad(true)}>开</button>
+              <button className={clsx('chip', !gamepadEnabled && 'active')} onClick={() => switchGamepad(false)}>{t('common.off')}</button>
+              <button className={clsx('chip', gamepadEnabled && 'active')} onClick={() => switchGamepad(true)}>{t('common.on')}</button>
             </div>
           </div>
 
           {/* 西瓜键唤起开关（默认关）：开时写入注册表关掉 Game Bar 抢键 */}
-          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 9 + rowOffset && 'settings-row-focus')} data-settings-row={9 + rowOffset}>
-            <div className="pr-4">
-              <p className="text-sm font-medium mb-0.5 flex items-center gap-2">
-                <Gamepad2 size={14} className="text-text-tertiary" />
-                用西瓜键打开软件
-              </p>
-              <p className="text-xs text-text-secondary leading-relaxed">
-                开启后按 Xbox 手柄西瓜键可从托盘唤起 ZEX，同时写入注册表关闭「Game Bar
-                用西瓜键打开」避免抢键（改的是当前用户注册表，重启 Game Bar 后完全生效）。
-                关闭则恢复 Game Bar 默认行为，西瓜键不再唤起 ZEX
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button className={clsx('chip', !guideBtn && 'active')} onClick={() => switchGuideBtn(false)}>关</button>
-              <button className={clsx('chip', guideBtn && 'active')} onClick={() => switchGuideBtn(true)}>开</button>
-            </div>
-          </div>
-
-          {/* PS logo 键唤起开关（默认关）：HID 报文直读，独立开关，不涉及 Game Bar */}
           <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 10 + rowOffset && 'settings-row-focus')} data-settings-row={10 + rowOffset}>
             <div className="pr-4">
               <p className="text-sm font-medium mb-0.5 flex items-center gap-2">
                 <Gamepad2 size={14} className="text-text-tertiary" />
-                用 PS logo 键打开软件
+                {t('settings.guideBtn')}
               </p>
               <p className="text-xs text-text-secondary leading-relaxed">
-                开启后按 DualSense / DualSense Edge 的 PS 键（USB 有线）可从托盘唤起 ZEX。
-                与西瓜键独立开关，走 HID 报文直读，不涉及 Game Bar 注册表
+                {t('settings.guideBtnDesc')}
               </p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <button className={clsx('chip', !psBtn && 'active')} onClick={() => switchPsBtn(false)}>关</button>
-              <button className={clsx('chip', psBtn && 'active')} onClick={() => switchPsBtn(true)}>开</button>
+              <button className={clsx('chip', !guideBtn && 'active')} onClick={() => switchGuideBtn(false)}>{t('common.off')}</button>
+              <button className={clsx('chip', guideBtn && 'active')} onClick={() => switchGuideBtn(true)}>{t('common.on')}</button>
+            </div>
+          </div>
+
+          {/* PS logo 键唤起开关（默认关）：HID 报文直读，独立开关，不涉及 Game Bar */}
+          <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass', focusedRow === 11 + rowOffset && 'settings-row-focus')} data-settings-row={11 + rowOffset}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5 flex items-center gap-2">
+                <Gamepad2 size={14} className="text-text-tertiary" />
+                {t('settings.psBtn')}
+              </p>
+              <p className="text-xs text-text-secondary leading-relaxed">
+                {t('settings.psBtnDesc')}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button className={clsx('chip', !psBtn && 'active')} onClick={() => switchPsBtn(false)}>{t('common.off')}</button>
+              <button className={clsx('chip', psBtn && 'active')} onClick={() => switchPsBtn(true)}>{t('common.on')}</button>
             </div>
           </div>
 
@@ -805,9 +829,9 @@ export default function SettingsView() {
           <div className="flex items-center gap-2.5 px-5 py-3 border-t border-border-glass text-xs">
             <Gamepad2 size={14} className={pads.length > 0 ? 'text-[#00d4ff]' : 'text-text-tertiary'} />
             {pads.length > 0 ? (
-              <span className="text-text-secondary">已连接：{pads.map((p) => p.name).join('、')}</span>
+              <span className="text-text-secondary">{t('settings.padsConnected', { list: pads.map((p) => p.name).join(t('settings.padsJoinSep')) })}</span>
             ) : (
-              <span className="text-text-tertiary">未连接手柄</span>
+              <span className="text-text-tertiary">{t('settings.padsNone')}</span>
             )}
           </div>
         </div>
@@ -815,22 +839,20 @@ export default function SettingsView() {
 
       {/* Covers */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">封面</h2>
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">{t('settings.sectionCovers')}</h2>
         <div className="glass-card p-5 overflow-hidden">
           <div className="flex items-center gap-2.5 mb-2">
             <KeyRound size={15} className="text-[#00d4ff]" />
             <p className="text-sm font-medium">SteamGridDB API Key</p>
           </div>
           <p className="text-xs text-text-secondary mb-4 leading-relaxed">
-            部分游戏在 Steam CDN 上没有竖版封面（如新上架的游戏），配置此 Key 后导入时会自动从
-            SteamGridDB 兜底获取 600×900 封面。免费申请：steamgriddb.com 登录后 → Preferences → API →
-            Generate API Key。
+            {t('settings.sgdbDesc')}
           </p>
           <div className="flex gap-2">
             <input
               value={sgdbKey}
               onChange={(e) => setSgdbKey(e.target.value)}
-              placeholder="粘贴 SteamGridDB API Key"
+              placeholder={t('settings.sgdbPlaceholder')}
               className="input flex-1 text-sm"
             />
             <button
@@ -838,7 +860,7 @@ export default function SettingsView() {
               disabled={savingKey}
               className="btn btn-accent text-sm px-5"
             >
-              {savingKey ? '保存中...' : '保存'}
+              {savingKey ? t('common.saving') : t('common.save')}
             </button>
           </div>
 
@@ -847,15 +869,13 @@ export default function SettingsView() {
             <p className="text-sm font-medium">TMDB API Key</p>
           </div>
           <p className="text-xs text-text-secondary mb-4 leading-relaxed">
-            影视库自动封面（海报、季封面、集剧照）数据源。免费申请：themoviedb.org 注册登录后 →
-            Settings → API → Create，取 v3 API Key（读访问令牌不需要）。
-            若无法连接 TMDB 请配置系统代理。
+            {t('settings.tmdbDesc')}
           </p>
           <div className="flex gap-2">
             <input
               value={tmdbKey}
               onChange={(e) => setTmdbKey(e.target.value)}
-              placeholder="粘贴 TMDB API Key"
+              placeholder={t('settings.tmdbPlaceholder')}
               className="input flex-1 text-sm"
             />
             <button
@@ -863,19 +883,18 @@ export default function SettingsView() {
               disabled={savingTmdbKey}
               className="btn btn-accent text-sm px-5"
             >
-              {savingTmdbKey ? '保存中...' : '保存'}
+              {savingTmdbKey ? t('common.saving') : t('common.save')}
             </button>
           </div>
 
           {/* Steam CDN 补封面（手动触发，导入保持零网络） */}
           {/* 获取缺失封面：行 + 进度条 + 结果整体作为焦点行，蓝底/竖线随高度实时伸缩 */}
-          <div className={clsx('mt-5 py-3.5 border-t border-border-glass -mx-5 px-5 -mb-5', focusedRow === 11 + rowOffset && 'settings-row-focus')} data-settings-row={11 + rowOffset}>
+          <div className={clsx('mt-5 py-3.5 border-t border-border-glass -mx-5 px-5 -mb-5', focusedRow === 12 + rowOffset && 'settings-row-focus')} data-settings-row={12 + rowOffset}>
             <div className="flex items-center justify-between">
               <div className="pr-4">
-                <p className="text-sm font-medium mb-0.5">从 Steam CDN 获取缺失封面</p>
+                <p className="text-sm font-medium mb-0.5">{t('settings.fetchCovers')}</p>
                 <p className="text-xs text-text-secondary leading-relaxed">
-                  导入时只从 Steam 本地缓存复制封面；此按钮会为缺少封面/横幅的 Steam
-                  游戏从 Steam CDN 下载补齐
+                  {t('settings.fetchCoversDesc')}
                 </p>
               </div>
               <button
@@ -884,7 +903,7 @@ export default function SettingsView() {
                 className="btn btn-glass gap-2 text-sm shrink-0"
               >
                 {fetchingCovers && <Loader2 size={14} className="animate-spin" />}
-                {fetchingCovers ? '获取中...' : '获取缺失封面'}
+                {fetchingCovers ? t('settings.fetching') : t('settings.fetchCoversBtn')}
               </button>
             </div>
             {fetchingCovers && fetchProgress && fetchProgress.total > 0 && (
@@ -897,14 +916,19 @@ export default function SettingsView() {
                   />
                 </div>
                 <p className="text-xs text-text-secondary mt-2">
-                  进度：{fetchProgress.done} / {fetchProgress.total}（成功 {fetchProgress.ok}，失败 {fetchProgress.fail}）
+                  {t('settings.fetchProgress', {
+                    done: fetchProgress.done,
+                    total: fetchProgress.total,
+                    ok: fetchProgress.ok,
+                    fail: fetchProgress.fail,
+                  })}
                 </p>
               </div>
             )}
 
             {/* 完成结果：内联显示，不弹窗 */}
             {fetchResult && (
-              <p className={clsx('text-xs mt-3', fetchResult.startsWith('获取失败') ? 'text-danger' : 'text-text-secondary')}>
+              <p className={clsx('text-xs mt-3', fetchFailed ? 'text-danger' : 'text-text-secondary')}>
                 {fetchResult}
               </p>
             )}
@@ -914,12 +938,12 @@ export default function SettingsView() {
 
       {/* Data */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">数据</h2>
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">{t('settings.sectionData')}</h2>
         <div className="glass-card overflow-hidden">
-          <div className={clsx('flex items-center justify-between px-6 py-5 border-b border-border-glass', focusedRow === 12 + rowOffset && 'settings-row-focus')} data-settings-row={12 + rowOffset}>
+          <div className={clsx('flex items-center justify-between px-6 py-5 border-b border-border-glass', focusedRow === 13 + rowOffset && 'settings-row-focus')} data-settings-row={13 + rowOffset}>
             <div>
-              <p className="text-sm font-medium mb-0.5">导出数据</p>
-              <p className="text-xs text-text-secondary">将所有游戏和影视数据导出为 JSON 文件</p>
+              <p className="text-sm font-medium mb-0.5">{t('settings.exportData')}</p>
+              <p className="text-xs text-text-secondary">{t('settings.exportDesc')}</p>
             </div>
             <button
               onClick={handleExport}
@@ -927,13 +951,13 @@ export default function SettingsView() {
               className="btn btn-glass gap-2 text-sm"
             >
               <Download size={15} />
-              {exporting ? '导出中...' : '导出'}
+              {exporting ? t('settings.exporting') : t('settings.exportBtn')}
             </button>
           </div>
-          <div className={clsx('flex items-center justify-between px-6 py-5 border-b border-border-glass', focusedRow === 13 + rowOffset && 'settings-row-focus')} data-settings-row={13 + rowOffset}>
+          <div className={clsx('flex items-center justify-between px-6 py-5 border-b border-border-glass', focusedRow === 14 + rowOffset && 'settings-row-focus')} data-settings-row={14 + rowOffset}>
             <div>
-              <p className="text-sm font-medium mb-0.5">导入数据</p>
-              <p className="text-xs text-text-secondary">从 JSON 备份文件恢复数据</p>
+              <p className="text-sm font-medium mb-0.5">{t('settings.importData')}</p>
+              <p className="text-xs text-text-secondary">{t('settings.importDesc')}</p>
             </div>
             <button
               onClick={handleImport}
@@ -941,13 +965,13 @@ export default function SettingsView() {
               className="btn btn-glass gap-2 text-sm"
             >
               <Upload size={15} />
-              {importing ? '导入中...' : '导入'}
+              {importing ? t('settings.importing') : t('settings.importBtn')}
             </button>
           </div>
-          <div className={clsx('flex items-center justify-between px-6 py-5', focusedRow === 14 + rowOffset && 'settings-row-focus')} data-settings-row={14 + rowOffset}>
+          <div className={clsx('flex items-center justify-between px-6 py-5', focusedRow === 15 + rowOffset && 'settings-row-focus')} data-settings-row={15 + rowOffset}>
             <div>
-              <p className="text-sm font-medium text-danger mb-0.5">清除所有数据</p>
-              <p className="text-xs text-text-secondary">删除全部游戏、影视和封面文件（API Key 保留）</p>
+              <p className="text-sm font-medium text-danger mb-0.5">{t('settings.clearData')}</p>
+              <p className="text-xs text-text-secondary">{t('settings.clearDesc')}</p>
             </div>
             <button
               onClick={handleClearAllData}
@@ -955,7 +979,7 @@ export default function SettingsView() {
               className="btn btn-danger gap-2 text-sm"
             >
               <Trash2 size={15} />
-              {clearing ? '清除中...' : '清除'}
+              {clearing ? t('settings.clearing') : t('settings.clearBtn')}
             </button>
           </div>
         </div>
@@ -963,55 +987,55 @@ export default function SettingsView() {
 
       {/* 库 */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">库</h2>
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">{t('settings.sectionLibs')}</h2>
         <div className="glass-card overflow-hidden">
           {([
-            { id: 'games' as const, name: '游戏库' },
-            { id: 'series' as const, name: '影视库' },
-            { id: 'music' as const, name: '音乐库' },
-            { id: 'stats' as const, name: '统计' },
+            { id: 'games' as const, name: 'nav.games' },
+            { id: 'series' as const, name: 'nav.series' },
+            { id: 'music' as const, name: 'nav.music' },
+            { id: 'stats' as const, name: 'nav.stats' },
           ]).map((lib, i) => (
             <div
               key={lib.id}
-              className={clsx('flex items-center justify-between gap-6 px-6 py-4', i > 0 && 'border-t border-border-glass', focusedRow === 15 + i + rowOffset && 'settings-row-focus')}
-              data-settings-row={15 + i + rowOffset}
+              className={clsx('flex items-center justify-between gap-6 px-6 py-4', i > 0 && 'border-t border-border-glass', focusedRow === 16 + i + rowOffset && 'settings-row-focus')}
+              data-settings-row={16 + i + rowOffset}
             >
-              <p className="text-sm font-medium">{lib.name}</p>
+              <p className="text-sm font-medium">{t(lib.name)}</p>
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   className={clsx('chip', hiddenLibraries.includes(lib.id) && 'active')}
                   onClick={() => tryHide(lib.id)}
                 >
-                  隐藏
+                  {t('settings.hide')}
                 </button>
                 <button
                   className={clsx('chip', !hiddenLibraries.includes(lib.id) && 'active')}
                   onClick={() => setLibraryHidden(lib.id, false)}
                 >
-                  显示
+                  {t('settings.show')}
                 </button>
               </div>
             </div>
           ))}
           <div className="px-5 py-2.5 border-t border-border-glass text-xs text-text-tertiary leading-snug">
-            主库最多隐藏 2 个，至少保留 1 个可见；统计页可单独隐藏，设置页本身固定显示。
+            {t('settings.libsNote')}
             <br />
             {hiddenLibraries.includes('series') && hiddenLibraries.includes('music')
-              ? '影视库与音乐库均已隐藏 → mpv 预加载已关闭（省内存），正在播放的内容不受影响'
-              : '影视库与音乐库同时隐藏时才会关闭 mpv 预加载'}
+              ? t('settings.libsMpvOff')
+              : t('settings.libsMpvNote')}
           </div>
         </div>
       </section>
 
       {/* 软件标识：自定义顶部封面与名称（空 = 默认 ZEX / 内置 logo） */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">软件标识</h2>
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">{t('settings.sectionBrand')}</h2>
         <div className="glass-card overflow-hidden">
           <div className={clsx('flex items-center justify-between gap-6 px-6 py-5')}>
             <div className="pr-4">
-              <p className="text-sm font-medium mb-0.5">软件名称</p>
+              <p className="text-sm font-medium mb-0.5">{t('settings.brandName')}</p>
               <p className="text-xs text-text-secondary leading-snug">
-                显示在顶部栏，留空恢复默认「ZEX」
+                {t('settings.brandNameDesc')}
               </p>
             </div>
             <input
@@ -1026,26 +1050,26 @@ export default function SettingsView() {
           </div>
           <div className={clsx('flex items-center justify-between gap-6 px-6 py-5 border-t border-border-glass')}>
             <div className="pr-4">
-              <p className="text-sm font-medium mb-0.5">软件封面</p>
+              <p className="text-sm font-medium mb-0.5">{t('settings.brandCover')}</p>
               <p className="text-xs text-text-secondary leading-snug">
-                顶部栏的 Logo，支持 png / jpg / webp（≤ 10MB），建议透明背景
+                {t('settings.brandCoverDesc')}
               </p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
               <img
                 src={brandCover ? coverSrc(brandCover) : zexLogo}
-                alt="封面预览"
+                alt={t('settings.brandCoverAlt')}
                 draggable={false}
                 className="w-10 h-10 object-contain rounded-lg bg-bg-surface border border-border-glass"
                 onError={(e) => { (e.currentTarget as HTMLImageElement).src = zexLogo; }}
               />
               <button onClick={handlePickBrandCover} className="btn btn-glass gap-2 text-sm px-4">
                 <ImageIcon size={14} />
-                更换封面
+                {t('settings.changeCover')}
               </button>
               {brandCover && (
                 <button onClick={() => void resetBrandCover()} className="btn btn-glass text-sm px-4 text-text-secondary">
-                  恢复默认
+                  {t('settings.resetDefault')}
                 </button>
               )}
             </div>
@@ -1055,7 +1079,7 @@ export default function SettingsView() {
 
       {/* About */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">关于</h2>
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">{t('settings.sectionAbout')}</h2>
         <div className="glass-card p-6">
           <div className="flex items-center gap-3 mb-4">
             <img
@@ -1067,13 +1091,11 @@ export default function SettingsView() {
             />
             <div>
               <h3 className="font-bold text-base">ZEX</h3>
-              <p className="text-sm text-text-secondary">版本 0.1.0</p>
+              <p className="text-sm text-text-secondary">{t('settings.version', { v: '0.1.0' })}</p>
             </div>
           </div>
           <p className="text-sm text-text-secondary leading-relaxed mb-4">
-            ZEX 是一款本地游戏、影视与音乐库管理工具。游戏库支持 Steam 扫描与手动添加、封面自动搜索、游玩时长追踪；
-            影视与音乐由内置 mpv 播放器驱动，支持剧集连播、进度记录与播放控制；最小化到托盘后照常后台记录，
-            可随时从托盘菜单唤回并切换库，支持 Xbox / PS 手柄全程导航。
+            {t('settings.aboutText')}
           </p>
           <a
             href="https://github.com/Yuzexiaoyu/Zex"
@@ -1082,7 +1104,7 @@ export default function SettingsView() {
             className="inline-flex items-center gap-2 text-sm text-[#00d4ff]/70 hover:text-[#00d4ff] transition-colors"
           >
             <ExternalLink size={14} />
-            GitHub 仓库
+            {t('settings.github')}
           </a>
         </div>
       </section>
@@ -1099,7 +1121,7 @@ export default function SettingsView() {
               <div className="w-8 h-8 rounded-lg bg-[rgba(239,68,68,0.12)] border border-[rgba(239,68,68,0.2)] flex items-center justify-center">
                 <AlertTriangle size={16} className="text-[#ef4444]" />
               </div>
-              <h3 className="text-base font-semibold">清除所有数据</h3>
+              <h3 className="text-base font-semibold">{t('settings.clearData')}</h3>
             </div>
             <button onClick={() => setShowClearConfirm(false)} className="w-8 h-8 rounded-lg flex items-center justify-center text-text-tertiary hover:bg-bg-surface-active">
               <X size={16} />
@@ -1107,11 +1129,11 @@ export default function SettingsView() {
           </div>
           <div className="px-5 py-4">
             <p className="text-sm text-text-secondary leading-relaxed">
-              将删除所有游戏、影视、季、集、游玩记录和封面文件，此操作不可恢复（API Key 设置保留）。确定继续？
+              {t('settings.clearConfirmBody')}
             </p>
             <div className="flex justify-end gap-2 pt-4">
-              <button onClick={() => setShowClearConfirm(false)} className={clsx('btn btn-ghost', clearFocused === 0 && 'gamepad-focus')}>否</button>
-              <button onClick={() => void doClearAll()} className={clsx('btn btn-danger', clearFocused === 1 && 'gamepad-focus')}>是</button>
+              <button onClick={() => setShowClearConfirm(false)} className={clsx('btn btn-ghost', clearFocused === 0 && 'gamepad-focus')}>{t('common.no')}</button>
+              <button onClick={() => void doClearAll()} className={clsx('btn btn-danger', clearFocused === 1 && 'gamepad-focus')}>{t('common.yes')}</button>
             </div>
           </div>
         </div>

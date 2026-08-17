@@ -10,6 +10,7 @@ import type { Episode, NextEpisode, SeriesDetailData } from '../types';
 import { cleanEpisodeTitle, coverSrc, formatDuration, formatRuntime, watchPercent, yearOf } from '../utils/media';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useFocusStore, useGamepadGroup, useFocusIndex, useRightStickScroll } from '../gamepad';
+import { useT } from '../i18n';
 
 interface Props {
   seriesId: string;
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
+  const t = useT();
   const [data, setData] = useState<SeriesDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeSeason, setActiveSeason] = useState('');
@@ -41,7 +43,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
     let alive = true;
     setLoading(true);
     load(false)
-      .catch((err) => { void message(`加载失败：${String(err)}`, { title: '错误', kind: 'error' }); })
+      .catch((err) => { void message(t('series.loadFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' }); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [load]);
@@ -232,13 +234,13 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
       onChanged?.();
     } catch (err) {
       patchEpisode(ep.id, { watched: ep.watched, watched_ms: ep.watched_ms }); // 回滚
-      void message(`标记失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('series.markFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
     }
   };
 
   const playEpisode = async (ep: Episode) => {
     if (!ep.local_path) {
-      void message('该集还没有关联本地视频文件', { title: '无法播放', kind: 'warning' });
+      void message(t('series.epNoFileThis'), { title: t('series.cannotPlay'), kind: 'warning' });
       return;
     }
     try {
@@ -247,7 +249,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
       await api.playEpisode(ep.id);
       onChanged?.();
     } catch (err) {
-      void message(`播放失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('series.playFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
     }
   };
 
@@ -258,7 +260,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
       await load();
       onChanged?.();
     } catch (err) {
-      void message(`操作失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('series.opFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
     }
   };
 
@@ -271,7 +273,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
       onChanged?.();
     } catch (err) {
       setData({ ...data, favorite: !next });
-      void message(`收藏失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('series.favoriteFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
     }
   };
 
@@ -279,7 +281,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
     return (
       <div className="h-full flex items-center justify-center gap-3 text-text-secondary">
         <Loader2 size={18} className="animate-spin text-[#00d4ff]" />
-        加载中…
+        {t('series.loading')}
       </div>
     );
   }
@@ -289,17 +291,17 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
   // 电影只有一个视频文件，季/集是内部承载结构，界面上不呈现
   const movieFile = isMovie ? data.seasons[0]?.episodes[0] : undefined;
   const metaBits = (isMovie
-    ? ['电影', year, data.status, data.genres, formatRuntime(movieFile?.runtime_minutes ?? 0)]
+    ? [t('series.movie'), year, data.status, data.genres, formatRuntime(movieFile?.runtime_minutes ?? 0)]
     : [
         year,
         data.status,
         data.genres,
-        data.seasons.length > 0 ? `${data.seasons.length} 季` : '',
-        data.episode_count > 0 ? `${data.episode_count} 集` : '',
+        data.seasons.length > 0 ? t('series.seasonCount', { n: data.seasons.length }) : '',
+        data.episode_count > 0 ? t('series.episodeCount', { n: data.episode_count }) : '',
       ]
   )
     // 累计观看时长（由播放会话累加，和游戏库的「已玩 X」同构）
-    .concat(data.total_seconds > 0 ? [`已看 ${formatDuration(data.total_seconds)}`] : [])
+    .concat(data.total_seconds > 0 ? [t('series.watchedTotal', { time: formatDuration(data.total_seconds) })] : [])
     .filter(Boolean);
 
   return (
@@ -321,7 +323,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
         <div className="sticky top-0 z-20 -mx-8 px-8 py-4 flex items-center gap-3">
           <button onClick={onClose} className={clsx('detail-back', topFocused === 0 && 'gamepad-focus')}>
             <ArrowLeft size={16} />
-            返回影视库
+            {t('series.backToLibrary')}
           </button>
         </div>
 
@@ -370,7 +372,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
               </p>
             ) : (
               <p className="mt-4 text-sm text-white/45">
-                还没有剧情简介，可在影视库中右键获取 TMDB 元数据。
+                {t('series.noOverview')}
               </p>
             )}
 
@@ -381,7 +383,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
                   <div className="h-full rounded-full bg-[#00d4ff] shadow-[0_0_12px_rgba(0,212,255,0.6)]" style={{ width: `${progressPct}%` }} />
                 </div>
                 <span className="text-xs text-white/60 tabular-nums whitespace-nowrap">
-                  已看 {data.watched_count}/{data.episode_count}
+                  {t('series.watchedCount', { watched: data.watched_count, total: data.episode_count })}
                 </span>
               </div>
             )}
@@ -398,9 +400,9 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
                   className={clsx('btn btn-accent px-6 py-3 text-sm', heroFocused === 0 && 'gamepad-focus')}
                 >
                   <Play size={16} fill="currentColor" />
-                  {isMovie ? '播放电影' : (
+                  {isMovie ? t('series.playMovie') : (
                     <>
-                      {data.watched_count > 0 ? '继续观看' : '开始观看'}
+                      {data.watched_count > 0 ? t('series.continueWatching') : t('series.startWatching')}
                       <span className="opacity-70 tabular-nums">
                         S{String(nextEp.season_number).padStart(2, '0')}E{String(nextEp.episode_number).padStart(2, '0')}
                       </span>
@@ -413,12 +415,12 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
                   className={clsx('btn btn-accent px-6 py-3 text-sm', heroFocused === 0 && 'gamepad-focus')}
                 >
                   <Play size={16} fill="currentColor" />
-                  重新播放
+                  {t('series.replay')}
                 </button>
               ) : data.episode_count > 0 ? (
                 <span className={clsx('btn btn-glass px-6 py-3 text-sm cursor-default', heroFocused === 0 && 'gamepad-focus')}>
                   <CheckCheck size={16} className="text-green-400" />
-                  全部看完了
+                  {t('series.allWatched')}
                 </span>
               ) : null}
 
@@ -431,7 +433,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
                   className={data.favorite ? 'text-[#ffd75e]' : ''}
                   fill={data.favorite ? 'currentColor' : 'none'}
                 />
-                {data.favorite ? '已收藏' : '收藏'}
+                {data.favorite ? t('series.favorited') : t('series.favorite')}
               </button>
             </div>
           </div>
@@ -453,10 +455,10 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
                     s.id === (season?.id ?? '') && 'active',
                     seasonDone && 'done',
                   )}
-                  title={seasonDone ? '整季已看完' : undefined}
+                  title={seasonDone ? t('series.seasonDoneTitle') : undefined}
                 >
                   <Layers size={13} />
-                  {s.name?.trim() || `第 ${s.season_number} 季`}
+                  {s.name?.trim() || t('series.seasonN', { n: s.season_number })}
                   <span className={clsx('tabular-nums text-xs', seasonDone ? 'text-[#34d399] font-semibold' : 'opacity-60')}>
                     {watched}/{s.episodes.length}
                   </span>
@@ -476,14 +478,14 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
                   className={clsx('btn btn-glass py-2 px-3.5 text-xs', seasonActionsFocused === 0 && 'gamepad-focus')}
                 >
                   <CheckCheck size={13} />
-                  整季标记已看
+                  {t('series.markSeasonWatched')}
                 </button>
                 <button
                   onClick={() => setSeasonWatched(false)}
                   className={clsx('btn btn-glass py-2 px-3.5 text-xs', seasonActionsFocused === 1 && 'gamepad-focus')}
                 >
                   <RotateCcw size={13} />
-                  整季重置
+                  {t('series.resetSeason')}
                 </button>
               </div>
             )}
@@ -495,12 +497,12 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
           <div className="py-16 flex flex-col items-center gap-3 text-center">
             <Film size={36} className="text-text-tertiary" />
             <p className="text-sm text-text-secondary">
-              {isMovie ? '这部电影还没有关联视频文件' : '这一季还没有剧集数据'}
+              {isMovie ? t('series.noEpMovie') : t('series.noEpSeason')}
             </p>
             <p className="text-xs text-text-tertiary">
               {isMovie
-                ? '重新添加并在「单个视频（电影）」模式下选择视频文件'
-                : '重新添加影视并选择包含视频文件的文件夹即可自动导入'}
+                ? t('series.noEpMovieHint')
+                : t('series.noEpSeasonHint')}
             </p>
           </div>
         ) : (
@@ -573,7 +575,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
                           {ep.local_path.split(/[/\\]/).pop()}
                         </span>
                       ) : (
-                        <span className="text-[#f59e0b]/80">未关联本地文件</span>
+                        <span className="text-[#f59e0b]/80">{t('series.epNoLocalFile')}</span>
                       )}
                     </div>
                   </div>
@@ -583,14 +585,14 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
                     <button
                       onClick={() => void playEpisode(ep)}
                       className="ep-action"
-                      title={ep.local_path ? '播放' : '未关联视频文件'}
+                      title={ep.local_path ? t('series.play') : t('series.epNoFileShort')}
                     >
                       <Play size={15} fill="currentColor" />
                     </button>
                     <button
                       onClick={() => void toggleWatched(ep)}
                       className={clsx('ep-action', ep.watched && 'done')}
-                      title={ep.watched ? '标记为未看' : '标记为已看'}
+                      title={ep.watched ? t('series.markUnwatched') : t('series.markWatched')}
                     >
                       <Check size={15} />
                     </button>

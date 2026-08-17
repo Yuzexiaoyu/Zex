@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { Gamepad2, Film, Music, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
 import * as api from './api';
+import { initLang, useT } from './i18n';
 import { coverSrc } from './utils/media';
 
 // ── 托盘菜单的 HTML 底色 —— 必须在任何异步步骤之前执行 ──
@@ -25,6 +26,7 @@ interface ProgressPayload {
 }
 
 function TrayMenuBody() {
+  const t = useT();
   // wrapper 提供 3px 透明内边距，让 .tray-menu 的 border-radius 抗锯齿边缘像素
   // 不会紧贴窗口边界——DWM 合成器在像素有透明邻居时才能正确混合 alpha
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -203,8 +205,8 @@ function TrayMenuBody() {
               </div>
               <div className="tray-music-info">
                 <p className="tray-music-title" title={meta.title}>{meta.title}</p>
-                <p className="tray-music-artist" title={meta.artist || '未知歌手'}>
-                  {meta.artist || '未知歌手'}
+                <p className="tray-music-artist" title={meta.artist || t('music.unknownArtist')}>
+                  {meta.artist || t('music.unknownArtist')}
                 </p>
               </div>
             </div>
@@ -216,19 +218,19 @@ function TrayMenuBody() {
               onPointerMove={onTrackMove}
               onPointerUp={onTrackUp}
               onPointerCancel={onTrackCancel}
-              title="拖动进度"
+              title={t('misc.traySeekHint')}
             >
               <div className="tray-music-track-fill" style={{ width: `${dragRatio != null ? dragRatio * 100 : pct}%` }} />
             </div>
             {/* 控制：上一首 / 播放暂停 / 下一首 */}
             <div className="tray-music-ctrl">
-              <button className="tray-music-btn" onClick={() => ctrl('prev')} title="上一首">
+              <button className="tray-music-btn" onClick={() => ctrl('prev')} title={t('music.prev')}>
                 <SkipBack size={13} />
               </button>
-              <button className="tray-music-btn tray-music-main" onClick={() => ctrl('toggle_pause', playing ? 1 : 0)} title={playing ? '暂停' : '播放'}>
+              <button className="tray-music-btn tray-music-main" onClick={() => ctrl('toggle_pause', playing ? 1 : 0)} title={playing ? t('music.pause') : t('music.play')}>
                 {playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
               </button>
-              <button className="tray-music-btn" onClick={() => ctrl('next')} title="下一首">
+              <button className="tray-music-btn" onClick={() => ctrl('next')} title={t('music.next')}>
                 <SkipForward size={13} />
               </button>
             </div>
@@ -236,32 +238,32 @@ function TrayMenuBody() {
         ) : (
           <div className="tray-music-empty">
             <Music size={14} />
-            <span>未在播放</span>
+            <span>{t('misc.notPlaying')}</span>
           </div>
         ))}
         {!hiddenLibs.includes('music') && <div className="tray-menu-sep" />}
         {!hiddenLibs.includes('games') && (
           <button className="tray-menu-item" onClick={() => act('games')}>
             <Gamepad2 size={16} />
-            <span>游戏库</span>
+            <span>{t('nav.games')}</span>
           </button>
         )}
         {!hiddenLibs.includes('series') && (
           <button className="tray-menu-item" onClick={() => act('series')}>
             <Film size={16} />
-            <span>影视库</span>
+            <span>{t('nav.series')}</span>
           </button>
         )}
         {!hiddenLibs.includes('music') && (
           <button className="tray-menu-item" onClick={() => act('music')}>
             <Music size={16} />
-            <span>音乐库</span>
+            <span>{t('nav.music')}</span>
           </button>
         )}
         <div className="tray-menu-sep" />
         <button className="tray-menu-item danger" onClick={() => act('quit')}>
           <X size={16} />
-          <span>退出</span>
+          <span>{t('misc.quit')}</span>
         </button>
       </div>
     </div>
@@ -270,5 +272,7 @@ function TrayMenuBody() {
 
 // 导出挂载函数，由 main.tsx 在检测到 ?view=tray-menu 时调用
 export function trayMenu(container: HTMLElement) {
+  // 语言：localStorage 镜像已在模块加载时同步生效，这里再按数据库纠偏
+  void initLang();
   createRoot(container).render(<TrayMenuBody />);
 }

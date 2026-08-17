@@ -6,12 +6,14 @@ import { useFocusIndex, useFocusStore, useGamepadGroup, useRightStickScrollIf } 
 import type { Stats, TopEntry } from '../types';
 import { RowCard, longDur, MEDIA_COLORS } from '../components/StatsCovers';
 import StatsAdjustModal from '../components/StatsAdjustModal';
+import { useT } from '../i18n';
 
+// label/unit/countLabel 存 i18n key，渲染时 t() 取词
 const SECTIONS = [
   // 次数只统计音乐（games/series 的 count 恒为 0，前端不显示）
-  { key: 'game', label: '游戏', icon: Gamepad2, color: MEDIA_COLORS.game, unit: '款' },
-  { key: 'video', label: '影视', icon: Film, color: MEDIA_COLORS.video, unit: '部' },
-  { key: 'music', label: '音乐', icon: Music, color: MEDIA_COLORS.music, countLabel: '次播放', unit: '首' },
+  { key: 'game', label: 'stats.game', icon: Gamepad2, color: MEDIA_COLORS.game, unit: 'stats.unitGame' },
+  { key: 'video', label: 'stats.video', icon: Film, color: MEDIA_COLORS.video, unit: 'stats.unitVideo' },
+  { key: 'music', label: 'stats.music', icon: Music, color: MEDIA_COLORS.music, countLabel: 'stats.playCount', unit: 'stats.unitMusic' },
 ] as const;
 
 type SectionKey = (typeof SECTIONS)[number]['key'];
@@ -49,6 +51,7 @@ function ColSection({ stats, section, colOrder, onOpenMenu }: {
   colOrder: SectionKey[];  // 可见列顺序（隐藏的库不在内），手柄左右跨列按它跳转
   onOpenMenu: (e: React.MouseEvent, entry: TopEntry) => void; // 行右键（仅游戏列绑定）
 }) {
+  const t = useT();
   const d = stats[section.key];
   const Icon = section.icon;
   const top = d.top;
@@ -105,10 +108,10 @@ function ColSection({ stats, section, colOrder, onOpenMenu }: {
 
       <div className="stats-col-sub">
         {/* 次数只给音乐；游戏/影视只有时长和库存 */
-        section.key === 'music' && d.play_count > 0 && <b>{d.play_count.toLocaleString()} {section.countLabel}</b>}
-        <span>{d.played_count}/{d.library_count} {section.unit}</span>
+        section.key === 'music' && d.play_count > 0 && <b>{d.play_count.toLocaleString()} {t(section.countLabel!)}</b>}
+        <span>{d.played_count}/{d.library_count} {t(section.unit)}</span>
         {section.key === 'video' && (
-          <span>已看 {stats.total_watched_episodes}/{stats.total_episodes} 集</span>
+          <span>{t('stats.watchedEpisodes', { watched: stats.total_watched_episodes, total: stats.total_episodes })}</span>
         )}
       </div>
 
@@ -129,13 +132,14 @@ function ColSection({ stats, section, colOrder, onOpenMenu }: {
           ))}
         </div>
       ) : (
-        <div className="stats-col-empty">还没有记录</div>
+        <div className="stats-col-empty">{t('stats.noRecords')}</div>
       )}
     </section>
   );
 }
 
 export default function StatsView() {
+  const t = useT();
   const stats = useAppStore((s) => s.stats);
   const loadStats = useAppStore((s) => s.loadStats);
   // 隐藏的库 → 统计页去掉对应列（数据一次拉全量，只影响展示）
@@ -176,7 +180,7 @@ export default function StatsView() {
       <div className="h-full flex items-center justify-center px-8">
         <div className="text-center">
           <BarChart3 size={40} className="mx-auto mb-3 text-text-tertiary" />
-          <p className="text-base font-semibold mb-1">统计数据读取失败</p>
+          <p className="text-base font-semibold mb-1">{t('stats.loadFailed')}</p>
           <p className="text-sm text-text-secondary">{error}</p>
         </div>
       </div>
@@ -186,7 +190,7 @@ export default function StatsView() {
   if (!stats) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="stats-skeleton-pulse text-text-tertiary text-sm">正在统计…</div>
+        <div className="stats-skeleton-pulse text-text-tertiary text-sm">{t('stats.loading')}</div>
       </div>
     );
   }
@@ -196,9 +200,9 @@ export default function StatsView() {
       <div className="h-full flex items-center justify-center px-8">
         <div className="text-center animate-fade-up">
           <div className="stats-empty-orb mx-auto mb-6"><BarChart3 size={38} /></div>
-          <h2 className="text-xl font-bold mb-2">还没有任何记录</h2>
+          <h2 className="text-xl font-bold mb-2">{t('stats.emptyTitle')}</h2>
           <p className="text-sm text-text-secondary max-w-sm mx-auto leading-relaxed">
-            玩一局游戏、看一集剧、听一首歌，这里就会开始记录你的时间。
+            {t('stats.emptyDesc')}
           </p>
         </div>
       </div>
@@ -260,6 +264,7 @@ function StatsRowMenu({ x, y, name, onAdjust, onClose }: {
   onAdjust: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
   const [measured, setMeasured] = useState(false);
@@ -305,7 +310,7 @@ function StatsRowMenu({ x, y, name, onAdjust, onClose }: {
           title={name}
         >
           <Clock size={14} className="text-[#00d4ff]" />
-          调整时长
+          {t('stats.adjustDuration')}
         </button>
       </div>
     </div>,

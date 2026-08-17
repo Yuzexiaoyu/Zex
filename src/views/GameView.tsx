@@ -7,12 +7,14 @@ import DiskManagerModal from '../components/DiskManagerModal';
 import { message } from '@tauri-apps/plugin-dialog';
 import { Plus, Gamepad2, ChevronDown } from 'lucide-react';
 import { useEscIntercept } from '../utils/escIntercept';
+import { useT } from '../i18n';
 
 interface Props {
   onAddGame?: () => void;
 }
 
 export default function GameView({ onAddGame }: Props) {
+  const t = useT();
   // 逐字段订阅，避免无关字段（如音乐进度）带着整个游戏库重画
   const games = useAppStore((s) => s.games);
   const loadGames = useAppStore((s) => s.loadGames);
@@ -52,7 +54,7 @@ export default function GameView({ onAddGame }: Props) {
     try {
       await launchGame(id);
     } catch (err: any) {
-      await message(`启动失败：${typeof err === 'string' ? err : (err?.message ?? String(err))}`, { title: '错误', kind: 'error' });
+      await message(t('games.launchFailed', { msg: typeof err === 'string' ? err : (err?.message ?? String(err)) }), { title: t('common.error'), kind: 'error' });
     }
   }, [launchGame]);
 
@@ -69,15 +71,15 @@ export default function GameView({ onAddGame }: Props) {
               className="btn btn-accent gap-2 text-sm"
             >
               <Plus size={15} />
-              添加游戏
+              {t('games.addGame')}
               <ChevronDown size={13} className={addMenu ? 'rotate-180 transition-transform' : 'transition-transform'} />
             </button>
             {addMenu && (
               <div className="absolute left-0 top-full mt-3 z-50" onClick={(e) => e.stopPropagation()}>
                 <div className="glass-modal solid-modal w-80 overflow-hidden shadow-2xl animate-scale-in">
                   <div className="px-4 py-3 border-b border-border-glass bg-[rgba(0,212,255,0.05)]">
-                    <p className="text-sm font-semibold text-text-primary">添加到游戏库</p>
-                    <p className="mt-0.5 text-xs text-text-secondary">选择一种添加方式</p>
+                    <p className="text-sm font-semibold text-text-primary">{t('games.addToLibrary')}</p>
+                    <p className="mt-0.5 text-xs text-text-secondary">{t('games.chooseAddMethod')}</p>
                   </div>
                   <div className="p-2 space-y-1.5">
                     <button
@@ -88,8 +90,8 @@ export default function GameView({ onAddGame }: Props) {
                         <Plus size={18} className="text-[#00d4ff]" />
                       </span>
                       <span className="min-w-0">
-                        <span className="block text-sm font-medium text-text-primary">手动添加</span>
-                        <span className="block mt-0.5 text-xs text-text-secondary">填写名称、启动程序和启动参数</span>
+                        <span className="block text-sm font-medium text-text-primary">{t('games.addManual')}</span>
+                        <span className="block mt-0.5 text-xs text-text-secondary">{t('games.addManualDesc')}</span>
                       </span>
                     </button>
                     <button
@@ -100,8 +102,8 @@ export default function GameView({ onAddGame }: Props) {
                         <Gamepad2 size={18} className="text-text-secondary group-hover:text-text-primary" />
                       </span>
                       <span className="min-w-0">
-                        <span className="block text-sm font-medium text-text-primary">Steam 导入</span>
-                        <span className="block mt-0.5 text-xs text-text-secondary">扫描本机 Steam 库并批量导入</span>
+                        <span className="block text-sm font-medium text-text-primary">{t('games.steamImport')}</span>
+                        <span className="block mt-0.5 text-xs text-text-secondary">{t('games.steamImportDesc')}</span>
                       </span>
                     </button>
                   </div>

@@ -8,6 +8,7 @@ import { confirm, message } from '@tauri-apps/plugin-dialog';
 import { HardDrive, X, ArrowRight, Gamepad2, XCircle, AlertTriangle, Loader2, Check, SlidersHorizontal, Info } from 'lucide-react';
 import type { DiskVolume, Game, GameMoveResult } from '../types';
 import { useModalGamepad } from '../gamepad';
+import { useT } from '../i18n';
 
 // 待移动项（游戏 id → 迁移方案，同游戏多次拖拽以后一次为准）
 interface MoveItem {
@@ -47,11 +48,12 @@ function fmtBytes(n: number): string {
 // 要等几分钟，同一会话内重开直接读缓存（游戏装卸后重启应用即重新计算，缓存只加速重复打开）
 const folderSizeCache = new Map<string, number>();
 
-// 游戏归属盘符：优先 install_dir（Steam 游戏带完整目录），否则 exe_path 首字母
-function driveOf(g: Game): string {
+// 游戏归属盘符：优先 install_dir（Steam 游戏带完整目录），否则 exe_path 首字母；
+// 无法判定返回 null（渲染处翻译成「未知」）
+function driveOf(g: Game): string | null {
   const p = (g.install_dir || g.exe_path || '').trim();
   const m = /^([a-zA-Z]):/.exec(p);
-  return m ? m[1].toUpperCase() + ':' : '未知';
+  return m ? m[1].toUpperCase() + ':' : null;
 }
 
 // 大小计算路径：install_dir 即整个安装目录；否则用 exe_path 所在目录
@@ -92,6 +94,7 @@ function targetPathOf(g: Game, targetDrive: string, steamLibPaths: string[]): st
 }
 
 export default function DiskManagerModal({ onClose }: Props) {
+  const t = useT();
   const games = useAppStore((s) => s.games);
   const loadGames = useAppStore((s) => s.loadGames);
   const [volumes, setVolumes] = useState<DiskVolume[]>([]);
@@ -215,7 +218,7 @@ export default function DiskManagerModal({ onClose }: Props) {
   const gamesByDrive = useMemo(() => {
     const map: Record<string, Game[]> = {};
     for (const g of games) {
-      const d = moves[g.id] ? moves[g.id].to : driveOf(g);
+      const d = moves[g.id] ? moves[g.id].to : (driveOf(g) ?? 'UNKNOWN');
       (map[d] ||= []).push(g);
     }
     return map;
@@ -276,12 +279,12 @@ export default function DiskManagerModal({ onClose }: Props) {
     // 这里提前拦截并说明原因，而不是拖完点应用才报错）
     if (!(g.install_dir || '').trim()) {
       void message(
-        `「${g.name}」未设置安装目录，无法移动。请先在游戏详情中把「安装目录」设为整个游戏文件夹，再回来重试`,
-        { title: '无法移动', kind: 'warning' },
+        t('disk.noInstallDir', { name: g.name }),
+        { title: t('disk.cannotMove'), kind: 'warning' },
       );
       return;
     }
-    const from = driveOf(g);                   // 原始归属盘
+    const from = driveOf(g);                   // 原始归属盘（null = 无法判定，显示「未知」）
     const current = moves[gameId]?.to ?? from; // 当前显示盘（已移动过用目标盘）
     if (current === targetDrive) return;       // 还在原处，无意义
     setResults([]); // 开始新的迁移方案，清掉上一次的应用结果
@@ -297,7 +300,7 @@ export default function DiskManagerModal({ onClose }: Props) {
     const targetPath = targetPathOf(g, targetDrive, steamLibPaths);
     setMoves((m) => ({
       ...m,
-      [gameId]: { gameId, name: g.name, from, to: targetDrive, size: sizes[gameId] || 0, targetPath },
+      [gameId]: { gameId, name: g.name, from: from ?? 'UNKNOWN', to: targetDrive, size: sizes[gameId] || 0, targetPath },
     }));
   };
 
@@ -383,8 +386,8 @@ export default function DiskManagerModal({ onClose }: Props) {
   const handleApply = async () => {
     if (moveCount === 0 || applying) return;
     const ok = await confirm(
-      `确定要把 ${moveCount} 个游戏移动到目标磁盘吗？\n\n跨盘移动会复制整个游戏目录并删除源目录（约需几分钟到几十分钟不等），期间请勿关闭窗口。`,
-      { title: '磁盘管理', kind: 'warning' },
+      t('disk.applyConfirmGames', { n: moveCount }),
+      { title: t('disk.manage'), kind: 'warning' },
     );
     if (!ok) return;
     // M7：Steam 游戏的目标盘不在 Steam 库中 → 额外警告（不阻止，用户确认后仍可移动）
@@ -397,8 +400,8 @@ export default function DiskManagerModal({ onClose }: Props) {
       const badDrives = [...new Set(steamMoves.map((m) => m.to).filter((d) => !steamLibs.has(d)))];
       if (badDrives.length > 0) {
         const go = await confirm(
-          `${steamMoves.length} 个 Steam 游戏要移动到不在 Steam 库中的磁盘（${badDrives.join('、')}）。\n\n移动后 Steam 客户端可能无法识别这些游戏。可在 Steam 设置中先把该盘添加为游戏库，再移动。仍要移动吗？`,
-          { title: 'Steam 库提示', kind: 'warning' },
+          t('disk.steamWarnBody', { n: steamMoves.length, drives: badDrives.join('、') }),
+          { title: t('disk.steamWarnTitle'), kind: 'warning' },
         );
         if (!go) return;
       }
@@ -414,7 +417,7 @@ export default function DiskManagerModal({ onClose }: Props) {
       setMoves({});
       setDropTarget(null);
     } catch (err: any) {
-      await message(`移动失败：${err?.message ?? err}`, { title: '磁盘管理', kind: 'error' });
+      await message(t('disk.moveFailed', { msg: err?.message ?? err }), { title: t('disk.manage'), kind: 'error' });
     } finally {
       setApplying(false);
       setCancelling(false);
@@ -445,8 +448,8 @@ export default function DiskManagerModal({ onClose }: Props) {
   const handleRestartSteam = async () => {
     if (restarting) return;
     const ok = await confirm(
-      '重启 Steam 客户端让移动的游戏被识别？\n\nSteam 将被强制重启：若正在运行游戏、下载或云同步会被中断，随后以托盘方式重新启动。',
-      { title: '重启 Steam', kind: 'warning' },
+      t('disk.restartConfirm'),
+      { title: t('disk.restartSteamTitle'), kind: 'warning' },
     );
     if (!ok) return;
     setRestarting(true);
@@ -454,12 +457,12 @@ export default function DiskManagerModal({ onClose }: Props) {
       const res = await api.restartSteamForRecognition();
       if (res.ok) {
         setRestartDone(true);
-        await message('Steam 已重启，稍后即可识别移动的游戏', { title: '完成', kind: 'info' });
+        await message(t('disk.restartDone'), { title: t('common.done'), kind: 'info' });
       } else {
-        await message(res.error ?? '重启 Steam 失败', { title: '未重启', kind: 'warning' });
+        await message(res.error ?? t('disk.restartFailed'), { title: t('disk.notRestarted'), kind: 'warning' });
       }
     } catch (err: any) {
-      await message(`重启失败: ${err?.message ?? err}`, { title: '错误', kind: 'error' });
+      await message(t('disk.restartErr', { msg: err?.message ?? err }), { title: t('common.error'), kind: 'error' });
     } finally {
       setRestarting(false);
     }
@@ -485,8 +488,8 @@ export default function DiskManagerModal({ onClose }: Props) {
               <HardDrive size={18} className="text-[#00d4ff]" />
             </div>
             <div>
-              <h2 className="text-lg font-bold leading-tight">磁盘管理</h2>
-              <p className="text-xs text-text-secondary mt-0.5">拖拽游戏卡片到目标磁盘，底部查看容量预览</p>
+              <h2 className="text-lg font-bold leading-tight">{t('disk.manage')}</h2>
+              <p className="text-xs text-text-secondary mt-0.5">{t('disk.descGames')}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -501,10 +504,10 @@ export default function DiskManagerModal({ onClose }: Props) {
                     ? 'bg-[rgba(0,212,255,0.12)] border-[rgba(0,212,255,0.3)] text-[#00d4ff]'
                     : 'bg-bg-surface border-border-glass text-text-secondary hover:text-white hover:bg-bg-surface-active'
                 }`}
-                title="选择要显示的卷"
+                title={t('disk.pickDrivesTitle')}
               >
                 <SlidersHorizontal size={14} />
-                显示卷
+                {t('disk.showDrives')}
                 {hiddenDrives.size > 0 && (
                   <span className="px-1 rounded bg-[#00d4ff]/20 text-[10px]">{hiddenDrives.size}</span>
                 )}
@@ -517,8 +520,8 @@ export default function DiskManagerModal({ onClose }: Props) {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="px-4 py-3 border-b border-border-glass flex items-center justify-between">
-                    <p className="text-sm font-semibold">显示哪些卷</p>
-                    <span className="text-xs text-text-tertiary">{visibleVolumes.length}/{volumes.length} 已显示</span>
+                    <p className="text-sm font-semibold">{t('disk.whichDrives')}</p>
+                    <span className="text-xs text-text-tertiary">{t('disk.shownCount', { shown: visibleVolumes.length, total: volumes.length })}</span>
                   </div>
                   <div className="p-2 max-h-64 overflow-y-auto space-y-0.5">
                     {volumes.map((v) => {
@@ -540,17 +543,17 @@ export default function DiskManagerModal({ onClose }: Props) {
                               {v.label && <span className="text-text-tertiary font-normal"> · {v.label}</span>}
                             </span>
                             <span className="block text-[11px] text-text-tertiary leading-tight">
-                              {fmtBytes(v.total)} · {(gamesByDrive[v.drive] || []).length} 款
+                              {fmtBytes(v.total)} · {t('disk.countGames', { n: (gamesByDrive[v.drive] || []).length })}
                             </span>
                           </span>
-                          {!checked && <span className="text-[10px] text-text-tertiary shrink-0">已隐藏</span>}
+                          {!checked && <span className="text-[10px] text-text-tertiary shrink-0">{t('disk.hidden')}</span>}
                         </label>
                       );
                     })}
                   </div>
                   <div className="px-3 py-2 border-t border-border-glass flex gap-2">
-                    <button onClick={showAllDrives} className="flex-1 text-xs py-1.5 rounded-lg bg-bg-surface hover:bg-bg-surface-active text-text-secondary">全部显示</button>
-                    <button onClick={hideAllDrives} className="flex-1 text-xs py-1.5 rounded-lg bg-bg-surface hover:bg-bg-surface-active text-text-secondary">全部隐藏</button>
+                    <button onClick={showAllDrives} className="flex-1 text-xs py-1.5 rounded-lg bg-bg-surface hover:bg-bg-surface-active text-text-secondary">{t('disk.showAll')}</button>
+                    <button onClick={hideAllDrives} className="flex-1 text-xs py-1.5 rounded-lg bg-bg-surface hover:bg-bg-surface-active text-text-secondary">{t('disk.hideAll')}</button>
                   </div>
                 </div>
               )}
@@ -560,7 +563,7 @@ export default function DiskManagerModal({ onClose }: Props) {
               onClick={guardedClose}
               disabled={applying}
               className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-white hover:bg-bg-surface-active transition-all disabled:opacity-40 disabled:hover:bg-transparent"
-              title={applying ? '移动进行中，请用「取消移动」中止' : '关闭'}
+              title={applying ? t('disk.movingBusy') : t('common.close')}
             >
               <X size={18} />
             </button>
@@ -572,13 +575,13 @@ export default function DiskManagerModal({ onClose }: Props) {
           {volumes.length === 0 && !volumeError ? (
             <div className="h-full flex flex-col items-center justify-center gap-3 text-text-tertiary">
               <Loader2 size={28} className="animate-spin" />
-              <span className="text-sm">正在读取磁盘卷…</span>
+              <span className="text-sm">{t('disk.loading')}</span>
             </div>
           ) : visibleVolumes.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
               <HardDrive size={28} className="opacity-40" />
-              <span className="text-sm">所有卷已隐藏</span>
-              <button onClick={() => setShowDrivePanel(true)} className="text-xs text-[#00d4ff] hover:underline">点击选择要显示的卷</button>
+              <span className="text-sm">{t('disk.allHidden')}</span>
+              <button onClick={() => setShowDrivePanel(true)} className="text-xs text-[#00d4ff] hover:underline">{t('disk.clickToShow')}</button>
             </div>
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5 content-start">
@@ -616,11 +619,11 @@ export default function DiskManagerModal({ onClose }: Props) {
                             {v.label && <span className="text-text-tertiary font-normal"> · {v.label}</span>}
                           </p>
                           <p className="text-xs text-text-tertiary mt-0.5 truncate">
-                            {v.file_system}{v.removable ? ' · 可移动' : ''} · {fmtBytes(v.total)}
+                            {v.file_system}{v.removable ? ` · ${t('disk.removable')}` : ''} · {fmtBytes(v.total)}
                           </p>
                         </div>
                       </div>
-                      <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-md bg-bg-surface text-text-secondary">{list.length} 款</span>
+                      <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-md bg-bg-surface text-text-secondary">{t('disk.countGames', { n: list.length })}</span>
                     </div>
 
                     {/* 容量条：应用后实时预览
@@ -635,8 +638,8 @@ export default function DiskManagerModal({ onClose }: Props) {
                       )}
                     </div>
                     <div className="flex items-center justify-between text-xs text-text-secondary mb-3">
-                      <span>已用 {fmtBytes(v.used)}</span>
-                      <span>可用 {fmtBytes(v.available)}</span>
+                      <span>{t('disk.used', { size: fmtBytes(v.used) })}</span>
+                      <span>{t('disk.free', { size: fmtBytes(v.available) })}</span>
                     </div>
 
                     {/* 容量预览（有移动时） */}
@@ -648,8 +651,8 @@ export default function DiskManagerModal({ onClose }: Props) {
                             ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
                             : 'bg-[rgba(0,212,255,0.08)] border-[rgba(0,212,255,0.2)] text-[#00d4ff]'
                       }`}>
-                        应用后可用 <b>{fmtBytes(free)}</b>
-                        {over && '（空间不足！）'}
+                        {t('disk.freeAfter')} <b>{fmtBytes(free)}</b>
+                        {over && t('disk.noSpace')}
                       </div>
                     )}
 
@@ -659,7 +662,7 @@ export default function DiskManagerModal({ onClose }: Props) {
                         <div className={`h-20 rounded-xl border border-dashed flex items-center justify-center text-xs transition-colors ${
                           isDrop ? 'border-[#00d4ff]/60 text-[#00d4ff] bg-[rgba(0,212,255,0.05)]' : 'border-border-glass text-text-tertiary'
                         }`}>
-                          {isDrop ? '松开以移动到此处' : '该盘暂无游戏'}
+                          {isDrop ? t('disk.dropHere') : t('disk.noneGames')}
                         </div>
                       )}
                       {list.map((g) => {
@@ -684,12 +687,12 @@ export default function DiskManagerModal({ onClose }: Props) {
                             <div className="min-w-0 flex-1 pointer-events-none">
                               <p className="text-sm font-medium text-text-primary truncate">{g.name}</p>
                               <p className="text-[11px] text-text-tertiary truncate mt-0.5">
-                                {size !== undefined ? fmtBytes(size) : '计算中…'}
-                                {target && <span className="text-[#00d4ff]"> · 待移至 {target.to}</span>}
+                                {size !== undefined ? fmtBytes(size) : t('disk.computing')}
+                                {target && <span className="text-[#00d4ff]"> · {t('disk.movingTo', { drive: target.to })}</span>}
                               </p>
                             </div>
                             {target && (
-                              <button onClick={() => removeMove(g.id)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title="撤销移动">
+                              <button onClick={() => removeMove(g.id)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
                                 <XCircle size={16} />
                               </button>
                             )}
@@ -708,14 +711,14 @@ export default function DiskManagerModal({ onClose }: Props) {
         {moveCount > 0 && !applying && results.length === 0 && (
           <div className="shrink-0 border-t border-border-glass px-6 pt-3 pb-2">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-medium text-text-secondary">待移动方案</p>
-              <span className="text-[11px] text-text-tertiary">共 {moveCount} 项 · 跨盘会复制并删除源目录</span>
+              <p className="text-xs font-medium text-text-secondary">{t('disk.plans')}</p>
+              <span className="text-[11px] text-text-tertiary">{t('disk.plansSummaryGames', { n: moveCount })}</span>
             </div>
             <div className="disk-scroll-y max-h-44 overflow-y-auto space-y-1.5 pr-1">
               {Object.values(moves).map((m) => (
                 <div key={m.gameId} className="flex items-center gap-3 rounded-xl px-3 py-2 bg-[rgba(0,212,255,0.05)] border border-[rgba(0,212,255,0.15)]">
                   <span className="shrink-0 w-9 h-9 rounded-lg bg-bg-surface border border-border-glass flex items-center justify-center text-xs font-bold text-text-secondary">
-                    {m.from.replace(':', '')}
+                    {m.from === 'UNKNOWN' ? t('disk.unknownDrive') : m.from.replace(':', '')}
                   </span>
                   <ArrowRight size={12} className="shrink-0 text-[#00d4ff]" />
                   <div className="min-w-0 flex-1">
@@ -725,14 +728,14 @@ export default function DiskManagerModal({ onClose }: Props) {
                     </p>
                     <p className="text-[11px] font-mono text-[#00d4ff] truncate leading-tight mt-0.5" title={m.targetPath}>{m.targetPath}</p>
                   </div>
-                  <button onClick={() => removeMove(m.gameId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title="撤销移动">
+                  <button onClick={() => removeMove(m.gameId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
                     <XCircle size={16} />
                   </button>
                 </div>
               ))}
               {unknownCount > 0 && (
                 <div className="flex items-center gap-1.5 text-[11px] text-amber-500 px-1 pt-0.5">
-                  <AlertTriangle size={12} /> {unknownCount} 款游戏路径不在当前卷
+                  <AlertTriangle size={12} /> {t('disk.unknownGames', { n: unknownCount })}
                 </div>
               )}
             </div>
@@ -748,7 +751,7 @@ export default function DiskManagerModal({ onClose }: Props) {
                 moveProgress ? (
                   <div className="flex items-center gap-3">
                     <Loader2 size={15} className="animate-spin text-[#00d4ff] shrink-0" />
-                    <span className="text-xs text-text-primary truncate shrink-0 max-w-44">正在移动 {moveProgress.name}</span>
+                    <span className="text-xs text-text-primary truncate shrink-0 max-w-44">{t('disk.moving', { title: moveProgress.name })}</span>
                     <div className="flex-1 min-w-24 h-1.5 rounded-full bg-bg-surface overflow-hidden">
                       <div
                         className="h-full bg-[#00d4ff]/70 transition-[width] duration-200"
@@ -759,13 +762,13 @@ export default function DiskManagerModal({ onClose }: Props) {
                   </div>
                 ) : (
                   <span className="flex items-center text-xs text-text-tertiary gap-2">
-                    <Loader2 size={14} className="animate-spin" />准备中…
+                    <Loader2 size={14} className="animate-spin" />{t('disk.preparing')}
                   </span>
                 )
               ) : results.length > 0 ? (
                 // 应用结果
                 <div className="disk-scroll-x flex items-center gap-2">
-                  <span className="text-xs text-text-tertiary shrink-0">结果：</span>
+                  <span className="text-xs text-text-tertiary shrink-0">{t('disk.result')}</span>
                   {results.map((r) => (
                     <span
                       key={r.gameId}
@@ -777,12 +780,12 @@ export default function DiskManagerModal({ onClose }: Props) {
                       }`}
                     >
                       {r.ok ? <Check size={12} className="shrink-0" /> : <AlertTriangle size={12} className="shrink-0" />}
-                      <span className="truncate min-w-0">{r.name || '未知游戏'}</span>
-                      {r.ok ? '已移动' : (
+                      <span className="truncate min-w-0">{r.name || t('disk.unknownGame')}</span>
+                      {r.ok ? t('disk.moved') : (
                         <span className="truncate">
                           {/* 取消/拒绝的长文本（含细节）放 title，chip 内截断不溢出 */}
                           {(r.error ?? '').includes('移动已取消')
-                            ? '已取消，游戏留在原目录'
+                            ? t('disk.cancelledGame')
                             : (r.error ?? '').split('\n')[0]}
                         </span>
                       )}
@@ -793,23 +796,23 @@ export default function DiskManagerModal({ onClose }: Props) {
                       成功后收起入口，失败提示原因保留手动重启兜底 */}
                   {results.some((r) => r.steamManifestMoved) && !restartDone && (
                     <span
-                      title="Steam 清单 appmanifest_*.acf 已随游戏文件夹搬到目标库，重启 Steam 客户端后 Steam 即可识别该游戏为已安装"
+                      title={t('disk.restartHint')}
                       className="shrink-0 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-[#00d4ff]/30 bg-[#00d4ff]/10 text-[#00d4ff]"
                     >
                       <Info size={12} className="shrink-0" />
-                      重启 Steam 客户端，让 Steam 识别
+                      {t('disk.restartSteam')}
                       <button
                         onClick={handleRestartSteam}
                         disabled={restarting}
                         className="ml-0.5 shrink-0 px-2 py-0.5 rounded-md bg-[#00d4ff]/15 hover:bg-[#00d4ff]/30 transition-colors disabled:opacity-50"
                       >
-                        {restarting ? <Loader2 size={12} className="animate-spin" /> : '静默重启'}
+                        {restarting ? <Loader2 size={12} className="animate-spin" /> : t('disk.silentRestart')}
                       </button>
                     </span>
                   )}
                 </div>
               ) : (
-                <span className="text-xs text-text-tertiary">拖动游戏卡片到目标磁盘，形成迁移方案</span>
+                <span className="text-xs text-text-tertiary">{t('disk.hintGames')}</span>
               )}
             </div>
             <div className="flex items-center gap-3 shrink-0">
@@ -820,11 +823,11 @@ export default function DiskManagerModal({ onClose }: Props) {
                   disabled={cancelling}
                   className="btn btn-ghost px-4 py-2 text-sm disabled:opacity-50"
                 >
-                  {cancelling ? <><Loader2 size={14} className="animate-spin" />正在取消…</> : '取消移动'}
+                  {cancelling ? <><Loader2 size={14} className="animate-spin" />{t('disk.cancelling')}</> : t('disk.cancelMove')}
                 </button>
               ) : (
                 <button onClick={onClose} className="btn btn-ghost px-4 py-2 text-sm disabled:opacity-50">
-                  取消
+                  {t('common.cancel')}
                 </button>
               )}
               <button
@@ -832,7 +835,7 @@ export default function DiskManagerModal({ onClose }: Props) {
                 disabled={moveCount === 0 || applying}
                 className="btn btn-accent px-5 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {applying ? <><Loader2 size={14} className="animate-spin" />移动中…</> : <><Check size={14} />应用（{moveCount}）</>}
+                {applying ? <><Loader2 size={14} className="animate-spin" />{t('disk.applying')}</> : <><Check size={14} />{t('disk.apply', { n: moveCount })}</>}
               </button>
             </div>
           </div>
@@ -856,7 +859,7 @@ export default function DiskManagerModal({ onClose }: Props) {
             <div className="min-w-0">
               <p className="text-sm font-medium text-text-primary truncate">{draggedGame.name}</p>
               <p className="text-[11px] text-text-tertiary truncate mt-0.5">
-                {driveOf(draggedGame)} · {sizes[draggedGame.id] !== undefined ? fmtBytes(sizes[draggedGame.id]) : '计算中…'}
+                {driveOf(draggedGame) ?? t('disk.unknownDrive')} · {sizes[draggedGame.id] !== undefined ? fmtBytes(sizes[draggedGame.id]) : t('disk.computing')}
               </p>
             </div>
           </div>

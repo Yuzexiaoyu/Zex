@@ -4,6 +4,7 @@ import { ListPlus, X } from 'lucide-react';
 import { message } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '../store';
 import { useModalGamepad } from '../gamepad';
+import { useT } from '../i18n';
 import type { Playlist } from '../types';
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
 
 // 新建歌单：输入名称 → 创建 → 可选把当前曲目一起加进去
 export default function CreatePlaylistModal({ initialTrackIds, onClose, onCreated }: Props) {
+  const t = useT();
   const createPlaylist = useAppStore((s) => s.createPlaylist);
   const playlists = useAppStore((s) => s.playlists);
   const [name, setName] = useState('');
@@ -37,7 +39,7 @@ export default function CreatePlaylistModal({ initialTrackIds, onClose, onCreate
       // 创建后自动筛选到新歌单（onCreated），不弹提示
       onCreated?.(pl);
     } catch (err) {
-      void message(`创建失败：${String(err)}`, { title: '错误', kind: 'error' });
+      void message(t('music.createPlaylistFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
       setBusy(false);
     }
   };
@@ -52,7 +54,7 @@ export default function CreatePlaylistModal({ initialTrackIds, onClose, onCreate
             <div className="w-8 h-8 rounded-lg bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.2)] flex items-center justify-center">
               <ListPlus size={16} className="text-[#00d4ff]" />
             </div>
-            <h3 className="text-base font-semibold">新建歌单</h3>
+            <h3 className="text-base font-semibold">{t('music.newPlaylist')}</h3>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-text-tertiary hover:bg-bg-surface-active">
             <X size={16} />
@@ -61,23 +63,23 @@ export default function CreatePlaylistModal({ initialTrackIds, onClose, onCreate
         {/* 表单 */}
         <div className="px-5 py-4 space-y-3">
           <div>
-            <label className="text-xs text-text-secondary mb-1.5 block">歌单名称</label>
+            <label className="text-xs text-text-secondary mb-1.5 block">{t('music.playlistName')}</label>
             <input
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
-              placeholder="输入歌单名称"
+              placeholder={t('music.playlistNamePlaceholder')}
               className="input w-full"
             />
           </div>
           {initialTrackIds.length > 0 && (
-            <p className="text-xs text-text-tertiary">创建后自动把 {initialTrackIds.length} 首曲目加入歌单</p>
+            <p className="text-xs text-text-tertiary">{t('music.createPlaylistNote', { n: initialTrackIds.length })}</p>
           )}
           <div className="flex justify-end gap-2 pt-1">
-            <button onClick={onClose} className="btn btn-ghost">取消</button>
+            <button onClick={onClose} className="btn btn-ghost">{t('common.cancel')}</button>
             <button onClick={() => void submit()} disabled={busy || !trimmed || duplicate} className="btn btn-accent">
-              {busy ? '创建中…' : '创建'}
+              {busy ? t('music.creatingPlaylist') : t('music.createPlaylist')}
             </button>
           </div>
         </div>

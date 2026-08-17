@@ -3525,14 +3525,27 @@ async fn import_steam_games(state: State<'_, AppState>, steam_games: Vec<SteamGa
 fn launch_game(state: State<'_, AppState>, game_id: String) -> AppResult<String> {
     let game = get_game(state.clone(), game_id.clone())?;
 
-    // 统一直接启动 exe，永远不走 steam://rungameid：
-    // Steam 客户端按自己的 libraryfolders.vdf 找游戏文件，游戏被磁盘管理移动后 Steam 找不到位置（报缺失文件）。
-    // 直接启动 exe 只依赖 ZEX 数据库里的 exe_path，移动时已更新为新路径，可靠。
+    // ── Steam 游戏：优先交给 Steam 客户端启动（steam://rungameid/<appid>）──
+    // Steam 游戏只有经 Steam 启动才带 DRM 校验 / 反作弊 / 成就 / 云存档上下文；
+    // 仅当 Steam 已识别游戏当前位置时走这条（识别判断见 steam_recognizes_game），
+    // 否则回退 exe 直启 —— 启动经 explorer 转发，会话无 PID，靠轮询按路径匹配
+    if game.steam_appid > 0 && steam_recognizes_game(game.steam_appid as u64, &game.install_dir) {
+        launch_via_steam(&state, &game, &game_id);
+        return Ok(String::new());
+    }
+
+    // ── 直接启动 exe（普通游戏；Steam 游戏的兜底）──
+    let pid = launch_exe(&game)?;
+    start_session(&state, &game, &game_id, pid, true);
+    Ok(String::new())
+}
+
+// 直接 spawn 游戏 exe，返回子进程 PID。
+// 工作目录：work_dir → install_dir → exe 所在目录。手动添加的游戏常只填了 exe 路径
+// （install/work_dir 均空），空字符串 current_dir 会让 spawn 直接失败（ERROR_INVALID_NAME）
+fn launch_exe(game: &Game) -> AppResult<u32> {
     let exe = &game.exe_path;
     let args = &game.launch_args;
-    // 工作目录：work_dir → install_dir → exe 所在目录。
-    // 手动添加的游戏常只填了 exe 路径（install/work_dir 均空），空字符串
-    // current_dir 会让 spawn 直接失败（ERROR_INVALID_NAME，此前 DSX 打不开的根因）
     let work_dir = if !game.work_dir.is_empty() {
         game.work_dir.clone()
     } else if !game.install_dir.is_empty() {
@@ -3583,30 +3596,86 @@ fn launch_game(state: State<'_, AppState>, game_id: String) -> AppResult<String>
         }
     }
 
-    let child = cmd.spawn()?;
-    let pid = child.id();
+    Ok(cmd.spawn()?.id())
+}
 
-    let session = GameSession {
-        game_id: game_id.clone(),
-        process_id: pid,
-        start_time: Utc::now(),
-        launch_start: Utc::now(),
-        exe_path: exe.clone(),
-        install_dir: game.install_dir.clone(),
-        process_seen: true, // 直接 spawn 的进程，PID 即运行证据
-        miss_count: 0,
-        no_window_polls: 0,
-        accumulated: 0,
+// 建会话并登记到 running_games（由 4 秒轮询线程跟踪/结算）
+fn start_session(
+    state: &State<'_, AppState>,
+    game: &Game,
+    game_id: &str,
+    process_id: u32,
+    process_seen: bool,
+) {
+    state.running_games.write().insert(
+        game_id.to_string(),
+        GameSession {
+            game_id: game_id.to_string(),
+            process_id,
+            start_time: Utc::now(),
+            launch_start: Utc::now(),
+            exe_path: game.exe_path.clone(),
+            install_dir: game.install_dir.clone(),
+            process_seen,
+            miss_count: 0,
+            no_window_polls: 0,
+            accumulated: 0,
+        },
+    );
+}
+
+// 通过 steam://rungameid/<appid> 协议交给 Steam 客户端启动：
+// 启动经 explorer 转发（explorer 毫秒级退出，不是游戏进程），拿不到游戏 PID →
+// 会话 process_seen=false，由轮询线程按 exe 路径/名称匹配锚定（首见时才开始计时）
+fn launch_via_steam(state: &State<'_, AppState>, game: &Game, game_id: &str) {
+    let url = format!("steam://rungameid/{}", game.steam_appid);
+    let _ = std::process::Command::new("explorer")
+        .arg(&url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    start_session(state, game, game_id, 0, false);
+}
+
+// Steam 是否已识别游戏当前位置（决定 steam://rungameid 能否成功拉起）：
+// 1) 游戏目录必须在某个 Steam 库根（steamapps 结构）下 —— 移到普通目录 Steam 不认识
+// 2) 该库必须有 appmanifest_<appid>.acf（磁盘管理移动时已随文件夹搬迁）
+// 3) 清单在 Steam 启动之后未被改动：Steam 启动时全量扫描建内存快照、运行中不监听
+//    文件变化，移动后没重启 Steam 时快照过期，rungameid 会按旧路径报「缺少文件」
+//    （重启 Steam 后快照刷新，自动恢复 Steam 启动）
+// Steam 未运行视为识别：rungameid 会先拉起 Steam，其启动扫描会发现新位置
+fn steam_recognizes_game(steam_appid: u64, install_dir: &str) -> bool {
+    let Some(lib_root) = steam_library_root_of(Path::new(install_dir)) else {
+        return false;
     };
+    let manifest = lib_root
+        .join("steamapps")
+        .join(format!("appmanifest_{}.acf", steam_appid));
+    let Ok(meta) = std::fs::metadata(&manifest) else {
+        return false; // 清单缺失：未搬迁成功（或非常规安装），Steam 快照仍指向旧位置
+    };
+    let Some(steam_start) = steam_process_start_time() else {
+        return true; // Steam 未运行：拉起时重新扫描
+    };
+    // 清单 mtime 与 Steam 启动时间同为 unix 秒；mtime 读失败保守判「过期」→ 走 exe 兜底
+    let manifest_mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(u64::MAX);
+    manifest_mtime <= steam_start
+}
 
-    {
-        let mut sessions = state.running_games.write();
-        sessions.insert(game_id.clone(), session);
-    }
-
-    // 次数只统计音乐（tracks.play_count）；游戏不再累计启动次数
-
-    Ok(format!("Game launched with PID: {}", pid))
+// steam.exe 进程创建时间（unix 秒）；Steam 未运行 → None
+fn steam_process_start_time() -> Option<u64> {
+    let mut sys = System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    sys.processes()
+        .values()
+        .find(|p| p.name().eq_ignore_ascii_case("steam.exe"))
+        .map(|p| p.start_time())
 }
 
 // 返回命中游戏的进程 PID 列表。命中条件：

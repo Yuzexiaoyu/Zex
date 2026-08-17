@@ -1,6 +1,6 @@
 # ZEX
 
-本地游戏库 · 影视库 · 音乐库一站式管理工具（Windows 桌面应用）
+本地游戏库 · 影视库 · 音乐库一站式管理工具
 
 ## 功能
 
@@ -45,23 +45,6 @@
 | **TMDB** | 影视库自动封面（海报、季封面、集剧照）与元数据（简介、评分、上映日期） | themoviedb.org 注册登录 → Settings → API → Create，取 v3 API Key（读访问令牌不需要） |
 
 > API Key 仅存储在本机数据库中，只用于向对应接口发起请求，不会上传到任何其他服务。
-
-## 🚀 构建与运行
-
-依赖：Node.js、Rust 工具链、随包 mpv（拉取见 `scripts/fetch-mpv.sh`）
-
-```bash
-# 编译（前端 + Rust 后端，debug 产物）
-build.bat          # 或 npx tauri build --debug --no-bundle
-
-# 直接运行已编译产物（不重新编译）
-start.bat
-
-# 生产构建（产物: src-tauri\target\release\zex.exe）
-npm run tauri build
-```
-
-构建 / 运行详细说明见 `START_SCRIPTS_README.md`。
 
 ## 🔒 隐私
 

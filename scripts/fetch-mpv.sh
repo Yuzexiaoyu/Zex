@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 拉取随包分发的 mpv（Windows x86_64）到 src-tauri/resources/mpv/。
+# 拉取随包分发的 mpv（Windows x86_64）到 src-tauri/mpv/（便携布局，exe 同级）。
 #
 # 两个坑：
 #  1. 解压必须用 C:/Windows/System32/tar.exe —— 那个是 bsdtar/libarchive，原生支持 7z。
@@ -10,7 +10,7 @@ set -euo pipefail
 
 REPO="shinchiro/mpv-winbuild-cmake"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEST="$ROOT/src-tauri/resources/mpv"
+DEST="$ROOT/src-tauri/mpv"
 BSDTAR="/c/Windows/System32/tar.exe"
 
 if [ -x "$DEST/mpv.exe" ]; then

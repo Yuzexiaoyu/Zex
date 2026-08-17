@@ -116,11 +116,12 @@ struct ProgressPayload {
 // ─────────────────────────────────────────────
 
 /// 找 mpv.exe。三个候选按可靠性排序 —— `tauri build --no-bundle`（start.bat 走的就是
-/// 这条）不会把 resources 复制到 exe 旁边，所以必须有开发树兜底
+/// 这条）不会把资源复制到 exe 旁边，所以必须有开发树兜底。
+/// 结构：mpv 平铺在 exe 同级（便携布局，无 resources/ 中间层）
 fn resolve_mpv(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(p) = app
         .path()
-        .resolve("resources/mpv/mpv.exe", tauri::path::BaseDirectory::Resource)
+        .resolve("mpv/mpv.exe", tauri::path::BaseDirectory::Resource)
     {
         if p.exists() {
             return Some(p);
@@ -128,14 +129,13 @@ fn resolve_mpv(app: &AppHandle) -> Option<PathBuf> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let p = dir.join("resources").join("mpv").join("mpv.exe");
+            let p = dir.join("mpv").join("mpv.exe");
             if p.exists() {
                 return Some(p);
             }
         }
     }
     let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("resources")
         .join("mpv")
         .join("mpv.exe");
     dev.exists().then_some(dev)
@@ -147,7 +147,7 @@ fn resolve_mpv(app: &AppHandle) -> Option<PathBuf> {
 fn resolve_skin(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(p) = app
         .path()
-        .resolve("resources/skin", tauri::path::BaseDirectory::Resource)
+        .resolve("skin", tauri::path::BaseDirectory::Resource)
     {
         if p.exists() {
             return Some(p);
@@ -155,14 +155,13 @@ fn resolve_skin(app: &AppHandle) -> Option<PathBuf> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let p = dir.join("resources").join("skin");
+            let p = dir.join("skin");
             if p.exists() {
                 return Some(p);
             }
         }
     }
     let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("resources")
         .join("skin");
     dev.exists().then_some(dev)
 }
@@ -634,7 +633,7 @@ fn quit_pipe(pipe: &str) {
 /// 屏蔽了 PEB 命令行读取，实测 251 个进程全空），按 cmdline 判「含 zex-mpv」永远
 /// 不命中 → 杀进程/数进程全部静默失效，退出时 mpv 没等退完就 app.exit（闪屏根因）。
 /// 改用 exe() 路径（Toolhelp32 提供，实测正常）：随包播放器无论开发树、target
-/// debug 还是安装版，路径都以 resources/mpv/mpv.exe 结尾；用户自己的 mpv 不会误伤
+/// debug 还是便携版，路径都以 mpv/mpv.exe 结尾；用户自己的 mpv 不会误伤
 fn is_zex_mpv(process: &sysinfo::Process) -> bool {
     if !process.name().to_string_lossy().to_ascii_lowercase().eq_ignore_ascii_case("mpv.exe") {
         return false;
@@ -646,7 +645,7 @@ fn is_zex_mpv(process: &sysinfo::Process) -> bool {
         .replace('\\', "/");
     // 去掉可能存在的 \\?\ 长路径前缀
     path.trim_start_matches("//?/")
-        .ends_with("resources/mpv/mpv.exe")
+        .ends_with("mpv/mpv.exe")
 }
 
 /// 强杀所有随包 mpv 进程 —— 托盘「退出」的兜底，覆盖活跃播放会话 / 空闲预热 /

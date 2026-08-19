@@ -174,25 +174,36 @@ fn delete_rtss_tray_icon(hwnd: HWND) -> bool {
     unsafe { Shell_NotifyIconW(NIM_DELETE, &mut nid) != FALSE }
 }
 
-/// RTSS 启动后清理托盘图标：先按进程名找 RTSS PID，再找托盘窗口，删除。
-/// RTSS 重启（新实例）后图标恢复，每次 ensure 就绪后调用
+/// 轮询删除 RTSS 托盘图标：窗口一出现立即 NIM_DELETE，图标存在时间 = 轮询间隔
+/// （50ms，肉眼不可见）。RTSS 自提权重启（新进程新窗口），每次 ensure 就绪后调用；
+/// 删除成功或超时后返回（超时下次 launch 再补，RTSS 不重建图标，漏删也无副作用）
 fn hide_rtss_tray() {
-    // 进程名匹配（RTSS 进程名稳定，路径被隐藏读不到）。sysinfo 只采集进程表，
-    // RTSS 的 PEB 命令行被屏蔽但进程名正常（mpv.rs 同款经验）
-    let sys = sysinfo::System::new();
-    let target = sys
-        .processes()
-        .values()
-        .find(|p| {
-            p.name()
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .eq_ignore_ascii_case("rtss.exe")
-        })
-        .map(|p| p.pid().as_u32());
-    let Some(pid) = target else { return };
-    if let Some(hwnd) = find_rtss_tray_window(pid) {
-        delete_rtss_tray_icon(hwnd);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        // 进程名匹配（RTSS 进程名稳定，路径被隐藏读不到）。sysinfo 只采集进程表，
+        // RTSS 的 PEB 命令行被屏蔽但进程名正常（mpv.rs 同款经验）
+        let sys = sysinfo::System::new();
+        let target = sys
+            .processes()
+            .values()
+            .find(|p| {
+                p.name()
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .eq_ignore_ascii_case("rtss.exe")
+            })
+            .map(|p| p.pid().as_u32());
+        if let Some(pid) = target {
+            if let Some(hwnd) = find_rtss_tray_window(pid) {
+                if delete_rtss_tray_icon(hwnd) {
+                    return; // 删除成功
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 

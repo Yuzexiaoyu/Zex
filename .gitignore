@@ -7,7 +7,7 @@ data/
 # 随包分发的 mpv（~120MB 二进制，不进版本库）。scripts/fetch-mpv.sh 负责拉取
 src-tauri/mpv/
 
-# 随包分发的 RTSS（~5.6MB 二进制，不进版本库）。scripts/fetch-rtss.sh 负责提取
+# 随包分发的 RTSS（~12MB 二进制，不进版本库）。scripts/fetch-rtss.sh 负责提取
 src-tauri/rtss/
 
 # Rust

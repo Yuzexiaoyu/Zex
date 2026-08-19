@@ -13,12 +13,13 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Manager, State, http::Response, Emitter};
+use tauri::{AppHandle, Manager, State, http::Response, Emitter};
 use thiserror::Error;
 use uuid::Uuid;
 
 mod mpv;
 mod gamepad;
+mod rtss;
 
 // ─────────────────────────────────────────────
 // Error Types
@@ -105,7 +106,7 @@ pub struct GameSession {
 // Database Helpers
 // ─────────────────────────────────────────────
 
-fn get_data_dir() -> PathBuf {
+pub fn get_data_dir() -> PathBuf {
     // 优先使用 exe 所在目录的 data/ 文件夹（便携模式）
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(data_dir) = exe_path.parent() {
@@ -3522,8 +3523,12 @@ async fn import_steam_games(state: State<'_, AppState>, steam_games: Vec<SteamGa
 // ─────────────────────────────────────────────
 
 #[tauri::command(async)]
-fn launch_game(state: State<'_, AppState>, game_id: String) -> AppResult<String> {
+fn launch_game(app: AppHandle, state: State<'_, AppState>, game_id: String) -> AppResult<String> {
     let game = get_game(state.clone(), game_id.clone())?;
+
+    // RTSS 帧数 OSD：该游戏启用时确保 RTSS 就绪 + 写好 profile（Steam 分支同样
+    // 适用 —— profile 按 exe 名匹配，与拿不拿得到 PID 无关）
+    rtss::ensure_osd_ready(&app, &state, &game.exe_path);
 
     // ── Steam 游戏：优先交给 Steam 客户端启动（steam://rungameid/<appid>）──
     // Steam 游戏只有经 Steam 启动才带 DRM 校验 / 反作弊 / 成就 / 云存档上下文；
@@ -7627,6 +7632,9 @@ pub fn run() {
             tray_menu_ready, tray_menu_action, close_tray_menu,
             set_desktop_lyrics_visible, set_desktop_lyrics_locked, set_lyrics_unlock_hotspot,
             show_main_window_cmd,
+            // RTSS 帧数 OSD（随包便携 RTSS 驱动）
+            rtss::rtss_status, rtss::rtss_launch, rtss::rtss_open_download_page,
+            rtss::rtss_get_osd, rtss::rtss_set_osd, rtss::rtss_restore_backup,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

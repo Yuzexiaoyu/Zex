@@ -10,6 +10,15 @@ import { useLang, useT, setLang, LANGUAGES } from '../i18n';
 import { setGamepadEnabled, isGamepadEnabled, useGamepadGroup, useFocusIndex, useRightStickScroll, useModalGamepad, getConnectedPads, onConnectedChange } from '../gamepad';
 import type { ConnectedPad } from '../gamepad';
 
+// OSD 帧数颜色预设（RTSS BaseColor 的 0x00RRGGBB 值）
+const RTSS_COLORS = [
+  { value: '00FF8000', labelKey: 'settings.rtssColorGreen' },
+  { value: '00FFFF00', labelKey: 'settings.rtssColorYellow' },
+  { value: '0000FFFF', labelKey: 'settings.rtssColorCyan' },
+  { value: '00FFFFFF', labelKey: 'settings.rtssColorWhite' },
+  { value: '00FF0000', labelKey: 'settings.rtssColorRed' },
+];
+
 export default function SettingsView() {
   // 语言：订阅 i18n 状态（chips 激活态 + 切换即时生效）
   const lang = useLang();
@@ -47,6 +56,15 @@ export default function SettingsView() {
   const [hwdec, setHwdec] = useState(true);
   const [hdr, setHdr] = useState(true);
   const [mpvOk, setMpvOk] = useState(true);
+  // RTSS 帧数 OSD（全局默认；游戏级开关在游戏右键菜单）
+  const [rtss, setRtss] = useState<{ installed: boolean; running: boolean }>({ installed: false, running: false });
+  const [rtssEnabled, setRtssEnabled] = useState(false);
+  const [rtssPosition, setRtssPosition] = useState(1);
+  const [rtssZoom, setRtssZoom] = useState(2);
+  const [rtssColor, setRtssColor] = useState('00FF8000');
+  const [rtssGraph, setRtssGraph] = useState(false);
+  const [rtssGraphMax, setRtssGraphMax] = useState(50);
+  const [launchingRtss, setLaunchingRtss] = useState(false);
   // 播放音乐时默认显示歌词（默认关，只有显式存过 "1" 才开）
   const [lyricsAutoShow, setLyricsAutoShow] = useState(false);
   const [fetchingCovers, setFetchingCovers] = useState(false);
@@ -108,6 +126,14 @@ export default function SettingsView() {
     api.mpvAvailable().then(setMpvOk).catch(() => {});
     // 播放音乐时默认显示歌词：默认关，只有显式存过 "1" 才开
     api.getSetting('lyrics_auto_show').then((v) => setLyricsAutoShow(v === '1')).catch(() => {});
+    // RTSS 帧数 OSD 全局默认（游戏级在右键菜单读写该游戏 profile）
+    api.rtssStatus().then((s) => setRtss({ installed: s.installed, running: s.running })).catch(() => {});
+    api.getSetting('rtss_osd_enabled').then((v) => setRtssEnabled(v === '1')).catch(() => {});
+    api.getSetting('rtss_osd_position').then((v) => setRtssPosition(Number(v) || 1)).catch(() => {});
+    api.getSetting('rtss_osd_zoom').then((v) => setRtssZoom(Number(v) || 2)).catch(() => {});
+    api.getSetting('rtss_osd_color').then((v) => setRtssColor(v || '00FF8000')).catch(() => {});
+    api.getSetting('rtss_osd_graph').then((v) => setRtssGraph(v === '1')).catch(() => {});
+    api.getSetting('rtss_osd_graph_max').then((v) => setRtssGraphMax(Number(v) || 50)).catch(() => {});
   }, []);
 
   // 手柄开关即时保存（写库 + 同步给 Gamepad 服务）
@@ -301,6 +327,35 @@ export default function SettingsView() {
     libRow('series'),
     libRow('music'),
     libRow('stats'),
+    // RTSS 帧数 OSD（性能区；编号 20+ 与 JSX data-settings-row 对齐，手柄导航贯穿）
+    {
+      chips: [
+        { active: () => !rtssEnabled, set: () => switchRtssEnabled(false) },
+        { active: () => rtssEnabled, set: () => switchRtssEnabled(true) },
+      ],
+    },
+    {
+      chips: [1, 2, 3, 4].map((p) => ({
+        active: () => rtssPosition === p,
+        set: () => switchRtssPosition(p),
+      })),
+    },
+    { onLeftRight: (dir) => switchRtssZoom(dir) },
+    {
+      chips: RTSS_COLORS.map((c) => ({
+        active: () => rtssColor === c.value,
+        set: () => switchRtssColor(c.value),
+      })),
+    },
+    {
+      chips: [
+        { active: () => !rtssGraph, set: () => switchRtssGraph(false) },
+        { active: () => rtssGraph, set: () => switchRtssGraph(true) },
+      ],
+    },
+    { onLeftRight: (dir) => switchRtssGraphMax(dir) },
+    // RTSS 状态行：已安装 → 启动/停止；缺失 → 打开下载页
+    { onA: () => { if (rtss.installed) void launchRtss(); else void api.rtssOpenDownloadPage().catch(() => {}); } },
   ];
 
   useGamepadGroup('settings:rows', {
@@ -400,6 +455,57 @@ export default function SettingsView() {
     void api.setSetting(key, value).catch((err: any) => {
       void message(t('common.saveFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
     });
+  };
+
+  // RTSS 帧数 OSD：全局默认设置（新游戏首次启用时的初始值；改的是 settings 表，
+  // 不直接动游戏 profile —— 游戏级开关在右键菜单读写 <exe>.cfg）
+  const saveRtssSetting = (key: string, value: string) => {
+    void api.setSetting(key, value).catch((err: any) => {
+      void message(t('common.saveFailed', { msg: err.message }), { title: t('common.error'), kind: 'error' });
+    });
+  };
+  const switchRtssEnabled = (v: boolean) => {
+    setRtssEnabled(v);
+    saveRtssSetting('rtss_osd_enabled', v ? '1' : '0');
+  };
+  const switchRtssPosition = (v: number) => {
+    setRtssPosition(v);
+    saveRtssSetting('rtss_osd_position', String(v));
+  };
+  const switchRtssZoom = (dir: 'left' | 'right') => {
+    const v = Math.min(8, Math.max(1, rtssZoom + (dir === 'right' ? 1 : -1)));
+    setRtssZoom(v);
+    saveRtssSetting('rtss_osd_zoom', String(v));
+  };
+  const switchRtssColor = (v: string) => {
+    setRtssColor(v);
+    saveRtssSetting('rtss_osd_color', v);
+  };
+  const switchRtssGraph = (v: boolean) => {
+    setRtssGraph(v);
+    saveRtssSetting('rtss_osd_graph', v ? '1' : '0');
+  };
+  const switchRtssGraphMax = (dir: 'left' | 'right') => {
+    const v = Math.min(200, Math.max(10, rtssGraphMax + (dir === 'right' ? 10 : -10)));
+    setRtssGraphMax(v);
+    saveRtssSetting('rtss_osd_graph_max', String(v));
+  };
+  const launchRtss = async () => {
+    setLaunchingRtss(true);
+    try {
+      const s = await api.rtssLaunch();
+      setRtss({ installed: s.installed, running: s.running });
+      if (s.installed && !s.running) {
+        void message(t('settings.rtssStartFailed', { msg: '' }), { title: t('common.error'), kind: 'error' });
+      }
+    } catch (e: any) {
+      void message(t('settings.rtssStartFailed', { msg: typeof e === 'string' ? e : (e?.message ?? String(e)) }), {
+        title: t('common.error'),
+        kind: 'error',
+      });
+    } finally {
+      setLaunchingRtss(false);
+    }
   };
 
   const switchEngine = (v: 'mpv' | 'external') => {
@@ -1073,6 +1179,135 @@ export default function SettingsView() {
                 </button>
               )}
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 性能：RTSS 帧数 OSD（全局默认；游戏级开关在游戏右键菜单） */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-text-tertiary uppercase tracking-widest mb-4">{t('settings.sectionPerf')}</h2>
+        <div className="glass-card overflow-hidden">
+          <div className={clsx('flex items-center justify-between px-6 py-5', focusedRow === 20 + rowOffset && 'settings-row-focus')} data-settings-row={20 + rowOffset}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5">{t('settings.rtssOsd')}</p>
+              <p className="text-xs text-text-secondary leading-snug">{t('settings.rtssOsdDesc')}</p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button className={clsx('chip', !rtssEnabled && 'active')} onClick={() => switchRtssEnabled(false)}>
+                {t('common.off')}
+              </button>
+              <button className={clsx('chip', rtssEnabled && 'active')} onClick={() => switchRtssEnabled(true)}>
+                {t('common.on')}
+              </button>
+            </div>
+          </div>
+
+          <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 21 + rowOffset && 'settings-row-focus')} data-settings-row={21 + rowOffset}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5">{t('settings.rtssOsdPosition')}</p>
+              <p className="text-xs text-text-secondary leading-snug">{t('settings.rtssOsdPositionDesc')}</p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {[1, 2, 3, 4].map((p) => (
+                <button key={p} className={clsx('chip', rtssPosition === p && 'active')} onClick={() => switchRtssPosition(p)}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 22 + rowOffset && 'settings-row-focus')} data-settings-row={22 + rowOffset}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5">{t('settings.rtssOsdZoom')}</p>
+              <p className="text-xs text-text-secondary leading-snug">{t('settings.rtssOsdZoomDesc')}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button className="chip" onClick={() => switchRtssZoom('left')} disabled={rtssZoom <= 1}>
+                <Minus size={13} />
+              </button>
+              <span className="text-sm font-semibold w-6 text-center">{rtssZoom}</span>
+              <button className="chip" onClick={() => switchRtssZoom('right')} disabled={rtssZoom >= 8}>
+                <Plus size={13} />
+              </button>
+            </div>
+          </div>
+
+          <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 23 + rowOffset && 'settings-row-focus')} data-settings-row={23 + rowOffset}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5">{t('settings.rtssOsdColor')}</p>
+              <p className="text-xs text-text-secondary leading-snug">{t('settings.rtssOsdColorDesc')}</p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {RTSS_COLORS.map((c) => (
+                <button
+                  key={c.value}
+                  className={clsx('chip', rtssColor === c.value && 'active')}
+                  onClick={() => switchRtssColor(c.value)}
+                >
+                  <span
+                    className="inline-block w-3 h-3 rounded-full mr-1.5 align-middle"
+                    style={{ backgroundColor: `#${c.value.slice(2)}` }}
+                  />
+                  {t(c.labelKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 24 + rowOffset && 'settings-row-focus')} data-settings-row={24 + rowOffset}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5">{t('settings.rtssOsdGraph')}</p>
+              <p className="text-xs text-text-secondary leading-snug">{t('settings.rtssOsdGraphDesc')}</p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button className={clsx('chip', !rtssGraph && 'active')} onClick={() => switchRtssGraph(false)}>
+                {t('common.off')}
+              </button>
+              <button className={clsx('chip', rtssGraph && 'active')} onClick={() => switchRtssGraph(true)}>
+                {t('common.on')}
+              </button>
+            </div>
+          </div>
+
+          <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 25 + rowOffset && 'settings-row-focus')} data-settings-row={25 + rowOffset}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5">{t('settings.rtssOsdGraphMax')}</p>
+              <p className="text-xs text-text-secondary leading-snug">{t('settings.rtssOsdGraphMaxDesc')}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button className="chip" onClick={() => switchRtssGraphMax('left')} disabled={rtssGraphMax <= 10}>
+                <Minus size={13} />
+              </button>
+              <span className="text-sm font-semibold w-10 text-center">{rtssGraphMax} ms</span>
+              <button className="chip" onClick={() => switchRtssGraphMax('right')} disabled={rtssGraphMax >= 200}>
+                <Plus size={13} />
+              </button>
+            </div>
+          </div>
+
+          {/* RTSS 状态行：已安装 → 启动；缺失 → 打开下载页 */}
+          <div className={clsx('flex items-center justify-between px-6 py-5 border-t border-border-glass', focusedRow === 26 + rowOffset && 'settings-row-focus')} data-settings-row={26 + rowOffset}>
+            <div className="pr-4">
+              <p className="text-sm font-medium mb-0.5">{t('settings.rtssStatus')}</p>
+              <p className="text-xs text-text-secondary leading-snug">{t('settings.rtssStatusDesc')}</p>
+              {!rtss.installed && (
+                <p className="mt-2 flex items-start gap-2 text-xs text-[#ffc94d] leading-snug">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  {t('settings.rtssNotInstalled')}
+                </p>
+              )}
+            </div>
+            {rtss.installed ? (
+              <button className="btn btn-glass gap-2 text-sm px-4 shrink-0" onClick={() => void launchRtss()} disabled={launchingRtss}>
+                {launchingRtss ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
+                {rtss.running ? t('settings.rtssRunning') : t('settings.rtssLaunchBtn')}
+              </button>
+            ) : (
+              <button className="btn btn-glass gap-2 text-sm px-4 shrink-0" onClick={() => void api.rtssOpenDownloadPage().catch(() => {})}>
+                <Download size={14} />
+                {t('settings.rtssDownloadPage')}
+              </button>
+            )}
           </div>
         </div>
       </section>

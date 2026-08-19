@@ -4,7 +4,7 @@ import { clsx } from 'clsx';
 import { useAppStore } from '../store';
 import * as api from '../api';
 import { message } from '@tauri-apps/plugin-dialog';
-import { Play, Info, Trash2, ImagePlus, RectangleHorizontal, HardDrive, FolderOpen } from 'lucide-react';
+import { Play, Info, Trash2, ImagePlus, RectangleHorizontal, HardDrive, FolderOpen, Activity, RotateCcw } from 'lucide-react';
 import type { Game } from '../types';
 import { useFocusIndex, useModalGamepad } from '../gamepad';
 import { useT } from '../i18n';
@@ -27,6 +27,10 @@ export default function GameContextMenu({ game, x, y, onClose, onChangeCover, on
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
   const [measured, setMeasured] = useState(false);
+  // 帧数显示（RTSS OSD）开关状态：进入菜单时读该游戏 profile
+  const [fpsOn, setFpsOn] = useState(false);
+  const [fpsLoaded, setFpsLoaded] = useState(false);
+  const [fpsBusy, setFpsBusy] = useState(false);
 
   // Clamp to viewport after measuring real size (first frame hidden)
   useLayoutEffect(() => {
@@ -39,11 +43,19 @@ export default function GameContextMenu({ game, x, y, onClose, onChangeCover, on
     setMeasured(true);
   }, [x, y]);
 
+  // 菜单打开即读该游戏的 OSD 配置（profile 按 exe 名匹配）
+  useLayoutEffect(() => {
+    api.rtssGetOsd(game.id).then((c) => {
+      setFpsOn(c.enabled);
+      setFpsLoaded(true);
+    }).catch(() => setFpsLoaded(true));
+  }, [game.id]);
+
   // 手柄完整操作：方向上下选、A 执行、B/Esc 关闭（右键菜单在 10 尺界面同样手柄可达）
   const focused = useFocusIndex('menu:game');
   useModalGamepad('menu:game', {
     onClose,
-    count: 7,
+    count: 9,
     cols: 1,
     activate: (i) => {
       if (i === 0) void handleLaunch();
@@ -51,7 +63,9 @@ export default function GameContextMenu({ game, x, y, onClose, onChangeCover, on
       else if (i === 2) handleChangeCover();
       else if (i === 3) handleChangeBanner();
       else if (i === 4) void handleBrowseFiles();
-      else if (i === 5) handleDiskManage();
+      else if (i === 5) void toggleFps();
+      else if (i === 6) void handleRestoreFps();
+      else if (i === 7) handleDiskManage();
       else void handleDelete();
     },
   });
@@ -94,6 +108,40 @@ export default function GameContextMenu({ game, x, y, onClose, onChangeCover, on
     onDiskManage();
   };
 
+  // 帧数显示开关：翻转该游戏 profile 的 EnableOSD（RTSS 即时生效，游戏运行中也可切）
+  const toggleFps = async () => {
+    if (fpsBusy || !fpsLoaded) return;
+    setFpsBusy(true);
+    try {
+      const cfg = await api.rtssGetOsd(game.id);
+      cfg.enabled = !cfg.enabled;
+      await api.rtssSetOsd(game.id, cfg);
+      setFpsOn(cfg.enabled);
+    } catch (e: any) {
+      void message(t('games.fpsSetFail', { msg: typeof e === 'string' ? e : (e?.message ?? String(e)) }), {
+        title: t('games.fpsCounter'),
+        kind: 'error',
+      });
+    } finally {
+      setFpsBusy(false);
+    }
+  };
+
+  // 还原：把首次修改前的备份复制回该游戏 profile
+  const handleRestoreFps = async () => {
+    try {
+      await api.rtssRestoreBackup(game.id);
+      const cfg = await api.rtssGetOsd(game.id);
+      setFpsOn(cfg.enabled);
+      void message(t('games.fpsRestored'), { title: t('games.fpsCounter'), kind: 'info' });
+    } catch (e: any) {
+      void message(t('games.fpsRestoreFail', { msg: typeof e === 'string' ? e : (e?.message ?? String(e)) }), {
+        title: t('games.fpsCounter'),
+        kind: 'error',
+      });
+    }
+  };
+
   const handleDelete = async () => {
     if (!confirm(t('games.deleteConfirm', { name: game.name }))) return;
     await deleteGame(game.id);
@@ -128,12 +176,23 @@ export default function GameContextMenu({ game, x, y, onClose, onChangeCover, on
           <FolderOpen size={14} className="text-text-secondary" />
           {t('games.browseFiles')}
         </button>
-        <button onClick={handleDiskManage} className={clsx('context-menu-item', focused === 5 && 'gamepad-focus')}>
+        <button onClick={() => void toggleFps()} className={clsx('context-menu-item', focused === 5 && 'gamepad-focus')}>
+          <Activity size={14} className={fpsOn ? 'text-[#00d4ff]' : 'text-text-secondary'} />
+          {t('games.fpsCounter')}
+          <span className={clsx('ml-auto text-[10px] px-1.5 py-0.5 rounded', fpsOn ? 'bg-[rgba(0,212,255,0.15)] text-[#00d4ff]' : 'bg-bg-surface-active text-text-tertiary')}>
+            {fpsOn ? t('common.on') : t('common.off')}
+          </span>
+        </button>
+        <button onClick={() => void handleRestoreFps()} className={clsx('context-menu-item', focused === 6 && 'gamepad-focus')}>
+          <RotateCcw size={14} className="text-text-secondary" />
+          {t('games.fpsRestore')}
+        </button>
+        <button onClick={handleDiskManage} className={clsx('context-menu-item', focused === 7 && 'gamepad-focus')}>
           <HardDrive size={14} className="text-text-secondary" />
           {t('games.diskManage')}
         </button>
         <div className="context-menu-divider" />
-        <button onClick={handleDelete} className={clsx('context-menu-item text-danger', focused === 6 && 'gamepad-focus')}>
+        <button onClick={handleDelete} className={clsx('context-menu-item text-danger', focused === 8 && 'gamepad-focus')}>
           <Trash2 size={14} />
           {t('games.deleteGame')}
         </button>

@@ -105,6 +105,14 @@ export const zh: Record<string, string> = {
   'games.browseInstallDirTitle': '浏览选择安装目录',
   'games.browseExeTitle': '浏览选择启动程序',
   'games.deleting': '删除中...',
+  // 右键菜单：帧数显示（RTSS OSD）
+  'games.fpsCounter': '帧数显示',
+  'games.fpsCounterOn': '启动时显示帧数',
+  'games.fpsCounterOff': '启动时不显示帧数',
+  'games.fpsSetFail': '帧数显示设置失败：{msg}',
+  'games.fpsRestore': '还原帧数设置',
+  'games.fpsRestored': '已还原该游戏的帧数设置',
+  'games.fpsRestoreFail': '还原失败：{msg}',
 };
 
 export const en: Record<string, string> = {
@@ -212,4 +220,12 @@ export const en: Record<string, string> = {
   'games.browseInstallDirTitle': 'Browse for the install folder',
   'games.browseExeTitle': 'Browse for the launcher',
   'games.deleting': 'Deleting...',
+  // Context menu: FPS counter (RTSS OSD)
+  'games.fpsCounter': 'FPS counter',
+  'games.fpsCounterOn': 'Show FPS on launch',
+  'games.fpsCounterOff': 'Hide FPS on launch',
+  'games.fpsSetFail': 'Failed to update FPS counter: {msg}',
+  'games.fpsRestore': 'Restore FPS settings',
+  'games.fpsRestored': 'FPS settings restored for this game',
+  'games.fpsRestoreFail': 'Restore failed: {msg}',
 };

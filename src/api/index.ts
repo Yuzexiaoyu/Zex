@@ -520,3 +520,44 @@ export async function importData(jsonData: string): Promise<void> {
 export async function clearAllData(): Promise<string> {
   return invoke('clear_all_data');
 }
+
+// ─── RTSS 帧数 OSD ─────────────────────────
+
+export interface RtssStatus {
+  installed: boolean;
+  running: boolean;
+  path: string | null;
+}
+
+export interface OsdConfig {
+  enabled: boolean;
+  position: number;
+  zoom: number;
+  color: string;
+  graph_enabled: boolean;
+  graph_max: number;
+}
+
+export async function rtssStatus(): Promise<RtssStatus> {
+  return invoke('rtss_status');
+}
+
+export async function rtssLaunch(): Promise<RtssStatus> {
+  return invoke('rtss_launch');
+}
+
+export async function rtssOpenDownloadPage(): Promise<void> {
+  return invoke('rtss_open_download_page');
+}
+
+export async function rtssGetOsd(gameId: string): Promise<OsdConfig> {
+  return invoke('rtss_get_osd', { gameId });
+}
+
+export async function rtssSetOsd(gameId: string, config: OsdConfig): Promise<void> {
+  return invoke('rtss_set_osd', { gameId, config });
+}
+
+export async function rtssRestoreBackup(gameId: string): Promise<void> {
+  return invoke('rtss_restore_backup', { gameId });
+}

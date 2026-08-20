@@ -529,14 +529,46 @@ export interface RtssStatus {
   path: string | null;
 }
 
-export interface OsdConfig {
+/** 一份 RTSS profile 的可配置项（全局 profile 与单游戏 profile 共用同一形状） */
+export interface ProfileConfig {
+  // 帧数显示（[OSD]）
   enabled: boolean;
-  position: number;
-  zoom: number;
-  color: string;
+  position: number;        // 1 左上 2 右上 3 左下 4 右下
+  zoom: number;            // 1-8
+  color: string;           // 0x00RRGGBB
+  fill: number;            // 0 无 1 淡 2 浓
+  refresh_period: number;  // ms
+  integer_framerate: boolean;
+  coordinate_space: number; // 0 渲染视口 1 整个画面
   graph_enabled: boolean;
-  graph_max: number;
+  graph_max: number;       // ms
+  graph_width: number;     // 字宽
+  graph_style: number;     // 0 折线 1 柱状
+  // 锁帧（[Framerate]）
+  framerate_enabled: boolean;
+  framerate_limit: number;
+  framerate_mode: number;  // 0 异步 1 前沿 2 后沿 3 Reflex
+  passive_wait: boolean;
+  reflex_marker: boolean;
+  reflex_sleep: number;    // 0 自动 1 呈现前 2 呈现后
+  // 兼容性（[Hooking]）
+  detection_level: number; // 0 无 1 低 2 中 3 高
+  dynamic_offset: boolean;
+  use_detours: boolean;
+  injection_delay: number; // ms
 }
+
+/** 配置对象：全局 + 库里每个游戏 */
+export interface ProfileTargetInfo {
+  /** 'global' 或 game_id */
+  id: string;
+  name: string;
+  /** 有自己的 profile 文件 = 单独设置；false = 跟随全局 */
+  has_own_profile: boolean;
+}
+
+/** 全局配置对象的固定 id（与后端 GLOBAL_TARGET 对应） */
+export const RTSS_GLOBAL = 'global';
 
 export async function rtssStatus(): Promise<RtssStatus> {
   return invoke('rtss_status');
@@ -550,14 +582,26 @@ export async function rtssOpenDownloadPage(): Promise<void> {
   return invoke('rtss_open_download_page');
 }
 
-export async function rtssGetOsd(gameId: string): Promise<OsdConfig> {
-  return invoke('rtss_get_osd', { gameId });
+export async function rtssListTargets(): Promise<ProfileTargetInfo[]> {
+  return invoke('rtss_list_targets');
 }
 
-export async function rtssSetOsd(gameId: string, config: OsdConfig): Promise<void> {
-  return invoke('rtss_set_osd', { gameId, config });
+/** 读一个配置对象；游戏若是「跟随全局」，返回的就是全局的值 */
+export async function rtssReadProfile(target: string): Promise<ProfileConfig> {
+  return invoke('rtss_read_profile', { target });
 }
 
-export async function rtssRestoreBackup(gameId: string): Promise<void> {
-  return invoke('rtss_restore_backup', { gameId });
+/** 写一个配置对象。对游戏来说，写入即意味着「单独设置」 */
+export async function rtssWriteProfile(target: string, config: ProfileConfig): Promise<void> {
+  return invoke('rtss_write_profile', { target, config });
+}
+
+/** 恢复跟随全局：删掉该游戏自己的 profile */
+export async function rtssClearProfile(gameId: string): Promise<void> {
+  return invoke('rtss_clear_profile', { gameId });
+}
+
+/** 出厂默认配置（在 Rust 侧定义）。「恢复默认」取这一份再写回当前配置对象 */
+export async function rtssDefaultProfile(): Promise<ProfileConfig> {
+  return invoke('rtss_default_profile');
 }

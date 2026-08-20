@@ -20,6 +20,8 @@ interface Props {
   onAddGame?: () => void;
   onOpenSteam?: () => void;
   onOpenDiskManager?: () => void;
+  /** 右键「帧数设置…」：打开帧数面板并选中该游戏 */
+  onOpenFpsSettings?: (gameId: string) => void;
 }
 
 // 拖拽状态：live reorder（实时重排）——拖拽期间工作数组随时等于最终顺序，
@@ -39,7 +41,7 @@ interface DragState {
 }
 
 export default function GameGrid({
-  games, onLaunch, columns = 8, onAddGame, onOpenSteam, onOpenDiskManager,
+  games, onLaunch, columns = 8, onAddGame, onOpenSteam, onOpenDiskManager, onOpenFpsSettings,
 }: Props) {
   const t = useT();
   // 逐字段订阅：网格里有全部可见 GameCard，不能跟着无关字段重画
@@ -388,6 +390,7 @@ export default function GameGrid({
           onChangeCover={() => setCoverGame({ game: menu.game, kind: 'portrait' })}
           onChangeBanner={() => setCoverGame({ game: menu.game, kind: 'wide' })}
           onDiskManage={() => onOpenDiskManager?.()}
+          onFpsSettings={() => onOpenFpsSettings?.(menu.game.id)}
         />
       )}
 

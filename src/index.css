@@ -390,6 +390,14 @@ html.app-blank body > * { visibility: hidden; }
   box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
 }
 
+/* 跟文字行并排、要打具体数字的窄输入（帧率上限）。同 .search-input 那条：
+   .input 的 width/padding 是无层规则，Tailwind 的 w-* / py-* 压不动它 */
+.input-num {
+  width: 88px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
 /* ─── Game Card Specific ───────────────────── */
 .game-card {
   position: relative;

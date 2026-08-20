@@ -40,35 +40,3 @@ ZEX 是一款装在自己电脑上的游戏、影视、音乐三合一管理工�
 ## 📸 截图
 
 截图即将更新，敬请期待。
-
-## 🚀 快速开始
-
-ZEX 是 Windows 桌面软件，目前支持两种方式：
-
-1. **直接下载**：从 [Releases](https://github.com/Yuzexiaoyu/Zex/releases) 页面下载安装包，解压即用
-2. **本地构建**（面向开发者）：
-
-```bash
-# 前端
-npm install
-npm run build
-
-# 后端
-cargo build
-
-# 开发运行
-npm run tauri dev
-```
-
-## 🙏 致谢
-
-ZEX 离不开以下开源项目的贡献：
-
-- **mpv** —— 内置影视播放器
-- **RTSS** —— 帧数显示与限帧功能
-- **SteamGridDB** —— 游戏封面数据
-- **TMDB** —— 影视数据
-
-## 📄 许可证
-
-详见 [LICENSE](LICENSE)。

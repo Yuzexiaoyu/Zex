@@ -42,3 +42,4 @@ dist-ssr
 
 # OS
 Thumbs.db
+.hf-tools/

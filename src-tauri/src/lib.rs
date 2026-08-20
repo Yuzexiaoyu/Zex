@@ -3526,9 +3526,10 @@ async fn import_steam_games(state: State<'_, AppState>, steam_games: Vec<SteamGa
 fn launch_game(app: AppHandle, state: State<'_, AppState>, game_id: String) -> AppResult<String> {
     let game = get_game(state.clone(), game_id.clone())?;
 
-    // RTSS 帧数 OSD：该游戏启用时确保 RTSS 就绪 + 写好 profile（Steam 分支同样
-    // 适用 —— profile 按 exe 名匹配，与拿不拿得到 PID 无关）
-    rtss::ensure_osd_ready(&app, &state, &game.exe_path);
+    // RTSS 帧数 OSD：该游戏会用到 OSD 或限帧时确保 RTSS 就绪。样式取哪一份由配置
+    // 对象决定（游戏有自己的 profile 就用它的，否则跟随全局），这里不写任何文件。
+    // Steam 分支同样适用 —— profile 按 exe 名匹配，与拿不拿得到 PID 无关
+    rtss::ensure_osd_ready(&app, &game.exe_path);
 
     // ── Steam 游戏：优先交给 Steam 客户端启动（steam://rungameid/<appid>）──
     // Steam 游戏只有经 Steam 启动才带 DRM 校验 / 反作弊 / 成就 / 云存档上下文；
@@ -7525,6 +7526,26 @@ pub fn run() {
                 }
             });
 
+            // 旧模型（一份全局广播到所有 profile）迁到 Global + 单游戏 profile。
+            // 必须排在预热判断之前 —— 预热读的就是迁移写出来的 Profiles/Global
+            rtss::migrate_profile_model(app.handle(), &app.state::<AppState>());
+
+            // ── RTSS 预热 ──
+            // 与 mpv 预热同款：后台先把 RTSS 拉起来（含托盘图标秒删），点游戏时
+            // 它已经在跑，注入不必等冷启动。帧数与限帧全关时不拉 —— RTSS 是全局
+            // 注入型进程，用不上就不该常驻（真要用，launch_game 里的 ensure 会补拉）
+            if rtss::global_wants_rtss(app.handle()) {
+                let rtss_app = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    match rtss::ensure_rtss_running(&rtss_app) {
+                        Ok(s) if s.running => log::info!("RTSS 预热完成"),
+                        Ok(_) => log::warn!("RTSS 预热：进程未就绪"),
+                        Err(e) => log::warn!("RTSS 预热失败：{e}"),
+                    }
+                });
+            }
+
             // ── 手柄（XInput + DualSense 双通道）──
             // XInput（gilrs）轮询 Xbox 系手柄；hidapi 补充通道直读 DualSense 有线报文。
             // nav_enabled 控制是否推给前端（收托盘/播放中 = false，mpv 内建手柄接管）。
@@ -7634,7 +7655,9 @@ pub fn run() {
             show_main_window_cmd,
             // RTSS 帧数 OSD（随包便携 RTSS 驱动）
             rtss::rtss_status, rtss::rtss_launch, rtss::rtss_open_download_page,
-            rtss::rtss_get_osd, rtss::rtss_set_osd, rtss::rtss_restore_backup,
+            rtss::rtss_list_targets, rtss::rtss_read_profile, rtss::rtss_write_profile,
+            rtss::rtss_clear_profile,
+            rtss::rtss_default_profile,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -7644,6 +7667,9 @@ pub fn run() {
             // 从未看到游戏进程的会话（启动失败）不写记录
             if let tauri::RunEvent::Exit = event {
                 let state = app_handle.state::<AppState>();
+                // 自己拉起的 RTSS 跟着一起销毁（复用别人的那份不动）。放在 Exit 而不是
+                // 托盘「退出」分支里：这样任何退出路径都能收干净
+                rtss::shutdown_rtss();
                 // mpv 预热实例收尾：置位 shutdown（防止 reader 的 EOF 补拉再拉起）
                 // 并收掉空闲实例。活跃会话（正在播放的 mpv）不动 —— 保持现有
                 // "关 ZEX 后播放器继续"的行为

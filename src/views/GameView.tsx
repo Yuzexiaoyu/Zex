@@ -5,9 +5,10 @@ import GameDetail from './GameDetail';
 import SteamScanModal from '../components/SteamScanModal';
 import DiskManagerModal from '../components/DiskManagerModal';
 import { message } from '@tauri-apps/plugin-dialog';
-import { Plus, Gamepad2, ChevronDown } from 'lucide-react';
+import { Plus, Gamepad2, ChevronDown, Gauge } from 'lucide-react';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useT } from '../i18n';
+import FpsSettingsModal from '../components/FpsSettingsModal';
 
 interface Props {
   onAddGame?: () => void;
@@ -27,6 +28,8 @@ export default function GameView({ onAddGame }: Props) {
   const [showSteamModal, setShowSteamModal] = useState(false);
   const [addMenu, setAddMenu] = useState(false); // 添加游戏下拉（手动 / Steam 导入）
   const [showDiskManager, setShowDiskManager] = useState(false); // 磁盘管理弹窗（右键菜单进入）
+  // 帧数/锁帧面板：null=关闭，''=打开且选中全局，game_id=打开且选中该游戏
+  const [showFpsModal, setShowFpsModal] = useState<string | null>(null);
 
   // 添加下拉开着时由它消费 Esc，App 的全局「Esc=收托盘」让位
   useEscIntercept(addMenu);
@@ -111,6 +114,15 @@ export default function GameView({ onAddGame }: Props) {
               </div>
             )}
           </div>
+
+          {/* 帧数 / 限帧设置（添加游戏右侧） */}
+          <button
+            onClick={() => setShowFpsModal('')}
+            className="btn btn-glass gap-2 text-sm"
+          >
+            <Gauge size={15} className="text-[#00d4ff]" />
+            {t('games.fpsSettings')}
+          </button>
         </div>
 
         {/* Grid */}
@@ -122,6 +134,7 @@ export default function GameView({ onAddGame }: Props) {
             onAddGame={onAddGame}
             onOpenSteam={() => setShowSteamModal(true)}
             onOpenDiskManager={() => setShowDiskManager(true)}
+            onOpenFpsSettings={(gameId) => setShowFpsModal(gameId)}
           />
         </div>
       </div>
@@ -145,6 +158,14 @@ export default function GameView({ onAddGame }: Props) {
       {/* 磁盘管理弹窗（游戏封面右键菜单进入） */}
       {showDiskManager && (
         <DiskManagerModal onClose={() => setShowDiskManager(false)} />
+      )}
+
+      {/* 帧数显示 / 锁帧面板。工具栏进 = 全局，右键进 = 选中那个游戏 */}
+      {showFpsModal !== null && (
+        <FpsSettingsModal
+          initialTarget={showFpsModal || undefined}
+          onClose={() => setShowFpsModal(null)}
+        />
       )}
     </div>
   );

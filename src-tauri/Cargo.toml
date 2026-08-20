@@ -45,7 +45,7 @@ image = "0.25"
 v_htmlescape = "0.1"
 urlencoding = "2"
 percent-encoding = "2"
-windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Memory", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_Devices_HumanInterfaceDevice"] }
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Memory", "Win32_System_Registry", "Win32_System_Threading", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_Devices_HumanInterfaceDevice"] }
 # RTSS profile API 动态加载（LoadProfile/SaveProfile/UpdateProfiles...）
 libloading = "0.8"
 # Xbox 手柄输入（Windows 走 XInput，最可靠）：后端线程常驻轮询，不受 WebView 窗口隐藏影响。

@@ -378,6 +378,33 @@ fn init_database(db_path: &PathBuf) -> AppResult<Connection> {
         }
     }
 
+    // 误除 1000 的存量修正：旧版导入把 lofty 的 kbps 又除了一次 1000（320kbps → 0、
+    // 1411kbps FLAC → 1）。等于 0 的被上面回填修掉了，这里处理非 0 错误值：
+    // 错误值 = 真实码率 / 1000，真实码率上限 ~20000kbps → 错误值都落在 [1, 20]；
+    // 落入该区间的真实值只有 ≤20kbps 的超低码率语音（它们的 audio_bitrate 路径
+    // 除 1000 后必为 0，不可能非 0 入库），重算用同一公式 → 幂等无害
+    {
+        let rows = {
+            let mut stmt = conn.prepare(
+                "SELECT file_path, duration_seconds FROM tracks WHERE bitrate > 0 AND bitrate <= 20 AND duration_seconds > 0",
+            )?;
+            let it = stmt.query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i32>(1)?))
+            })?;
+            it.filter_map(Result::ok).collect::<Vec<_>>()
+        };
+        for (fp, dur) in rows {
+            let size = std::fs::metadata(&fp).map(|m| m.len()).unwrap_or(0);
+            if size > 0 {
+                let bitrate = ((size * 8) / (dur as u64 * 1000)) as i32;
+                let _ = conn.execute(
+                    "UPDATE tracks SET bitrate = ?1 WHERE file_path = ?2 AND bitrate > 0 AND bitrate <= 20",
+                    params![bitrate, fp],
+                );
+            }
+        }
+    }
+
     Ok(conn)
 }
 
@@ -6400,11 +6427,13 @@ fn parse_audio_tags(path: &Path) -> Option<TrackPreview> {
     let props = tagged.properties();
     let duration = props.duration().as_secs() as i32;
     // 比特率：优先实际音频码率（VBR 也准）；部分格式（如 FLAC）audio_bitrate 缺失，
-    // 退到整体码率 / 平均码率（文件大小 ×8 ÷ 时长）兜底
+    // 退到整体码率 / 平均码率（文件大小 ×8 ÷ 时长）兜底。
+    // 注意 lofty 的 audio_bitrate/overall_bitrate 单位已是 kbps，不要再除 1000
+    // （曾误除 1000：320kbps → 0 不显示、1411kbps FLAC → 显示 1 kbps）
     let mut bitrate = props
         .audio_bitrate()
         .or_else(|| props.overall_bitrate())
-        .map(|b| (b / 1000) as i32)
+        .map(|b| b as i32)
         .unwrap_or(0);
     if bitrate <= 0 {
         let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
@@ -6865,6 +6894,7 @@ fn serve_covers_file(covers_dir: &Path, request: &tauri::http::Request<Vec<u8>>)
                 .status(304)
                 .header("Cache-Control", cache_control)
                 .header("ETag", tag.clone())
+                .header("Access-Control-Allow-Origin", "*") // 前端 fetch 转 objectURL 内存缓存用
                 .body(Cow::Borrowed(&b""[..]))
                 .unwrap();
         }
@@ -6887,7 +6917,8 @@ fn serve_covers_file(covers_dir: &Path, request: &tauri::http::Request<Vec<u8>>)
     };
     let mut builder = Response::builder()
         .header("Content-Type", mime)
-        .header("Cache-Control", cache_control);
+        .header("Cache-Control", cache_control)
+        .header("Access-Control-Allow-Origin", "*"); // 前端 fetch 转 objectURL 内存缓存用
     if let Some(tag) = etag {
         builder = builder.header("ETag", tag);
     }
@@ -6901,6 +6932,9 @@ fn serve_covers_file(covers_dir: &Path, request: &tauri::http::Request<Vec<u8>>)
 const TRAY_ID: &str = "zex-tray";
 const TRAY_MENU_LABEL: &str = "tray-menu";
 const TRAY_MENU_WIDTH: f64 = 200.0;
+// 窗口比菜单宽 6px（左右各 3px）：前端 wrapper 用 3px 透明内边距给圆角留
+// 抗锯齿缓冲，窗口若与菜单同宽，右侧圆角会被窗口边缘裁平（症状 = 左圆右方）
+const TRAY_MENU_WINDOW_WIDTH: f64 = TRAY_MENU_WIDTH + 6.0;
 
 // 自绘托盘菜单：系统原生菜单没法定制外观，这里用一个无边框透明置顶小窗承载
 // （右键托盘时按光标位置弹出，失焦自动收起）
@@ -6911,7 +6945,7 @@ fn build_tray_menu_window(app: &tauri::AppHandle) -> tauri::Result<tauri::Webvie
         tauri::WebviewUrl::App("index.html?view=tray-menu".into()),
     )
     .title("ZEX 托盘菜单")
-    .inner_size(TRAY_MENU_WIDTH, 60.0) // React 挂载后由 tray_menu_ready 修正确高度
+    .inner_size(TRAY_MENU_WINDOW_WIDTH, 60.0) // React 挂载后由 tray_menu_ready 修正确高度
     .decorations(false)
     .transparent(true)   // 让 CSS border-radius 的圆角透明像素不被窗口裁掉
     .always_on_top(true)
@@ -6974,7 +7008,7 @@ fn show_tray_menu(app: &tauri::AppHandle, cursor: &tauri::PhysicalPosition<f64>)
 #[tauri::command]
 fn tray_menu_ready(app: tauri::AppHandle, height: f64) {
     let Some(window) = app.get_webview_window(TRAY_MENU_LABEL) else { return };
-    let _ = window.set_size(tauri::LogicalSize::new(TRAY_MENU_WIDTH, height.max(80.0)));
+    let _ = window.set_size(tauri::LogicalSize::new(TRAY_MENU_WINDOW_WIDTH, height.max(80.0)));
     // 建窗时标记为 prebuild 状态（visible=false 且 focused=false），
     // 尺寸修正后继续保持隐藏 —— 等用户真正右键时才显示
 }

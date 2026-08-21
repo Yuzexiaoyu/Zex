@@ -15,6 +15,7 @@ import CreatePlaylistModal from '../components/CreatePlaylistModal';
 import SortMenu, { type SortOption, type SortMenuHandle } from '../components/SortMenu';
 import type { Track } from '../types';
 import { coverSrc } from '../utils/media';
+import CoverImg from '../components/CoverImg';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useGamepadGroup, useFocusIndex, useRightStickScroll } from '../gamepad';
 import { useT } from '../i18n';
@@ -578,9 +579,11 @@ export default function MusicView() {
                   trk.id === playingTrackId && 'music-row-playing', // 当前播放行：底色 + 左侧竖条
                 )}
                 style={{
-                  // 错位延迟按行在首屏中的序号算，不用全局 idx —— 否则从中间挂载的行
-                  // 会拿到几秒的延迟，出现「空白等半天才淡入」
-                  animationDelay: !everDragged && introWindow ? `${Math.min(vIdx * 40, 440)}ms` : undefined,
+                  // 错位延迟按行在当前挂载批次中的序号算，不用全局 idx —— 否则从中间
+                  // 挂载的行会拿到几秒的延迟，出现「空白等半天才淡入」。
+                  // 不设上限：封顶会把后半段行压到同一时刻开始动画，看起来
+                  // 「后半段瞬间一起出现」。序号只覆盖可见行，波浪自然收束
+                  animationDelay: !everDragged && introWindow ? `${vIdx * 30}ms` : undefined,
                 }}
                 onClick={() => {
                   if (multiSelect) toggleSelect(trk.id);
@@ -606,7 +609,10 @@ export default function MusicView() {
                 {/* 封面 / 默认图标 */}
                 <div className="relative w-11 h-11 rounded-lg overflow-hidden shrink-0 bg-bg-surface border border-border-glass flex items-center justify-center">
                   {trk.cover_path ? (
-                    <img src={coverSrc(trk.cover_path, trk.updated_at)} alt="" loading="lazy" className="w-full h-full object-cover" draggable={false} />
+                    // 行挂载时就在视口内（虚拟滚动 overscan 保证），lazy 只延迟解码调度
+                    // —— 快速滚动停下时全视口同时补解码。eager 挂载即解码；CoverImg
+                    // 提供内存缓存层（滚动回来零协议往返出图）
+                    <CoverImg src={coverSrc(trk.cover_path, trk.updated_at)} alt="" loading="eager" decoding="async" className="w-full h-full object-cover" draggable={false} />
                   ) : (
                     <Music2 size={20} className="text-text-tertiary" />
                   )}
@@ -683,7 +689,7 @@ export default function MusicView() {
               <div className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl glass-card border border-[#00d4ff]/40 shadow-xl">
                 <div className="w-11 h-11 rounded-lg overflow-hidden shrink-0 bg-bg-surface border border-border-glass flex items-center justify-center">
                   {src.cover_path
-                    ? <img src={coverSrc(src.cover_path, src.updated_at)} alt="" className="w-full h-full object-cover" draggable={false} />
+                    ? <CoverImg src={coverSrc(src.cover_path, src.updated_at)} alt="" className="w-full h-full object-cover" draggable={false} />
                     : <Music2 size={20} className="text-text-tertiary" />}
                 </div>
                 <div className="flex-1 min-w-0">

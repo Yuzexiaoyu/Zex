@@ -40,7 +40,7 @@ const VIEW_GROUP: Record<View, string> = {
   series: 'grid:series',
   music: 'music-list',
   stats: 'stats:col:game',
-  settings: 'settings:rows',
+  settings: 'settings:col:appearance',
 };
 
 function NavPill({ label, icon: Icon, index, active, onClick }: {
@@ -394,7 +394,23 @@ export default function App() {
           {activeView === 'series' && <SeriesView />}
           {activeView === 'music' && <MusicView />}
           {activeView === 'stats' && <StatsView />}
-          {activeView === 'settings' && <SettingsView />}
+          {/* 设置页常挂载：软件启动时就渲染、读回全部设置、并完成动态留空的测量，
+              切换视图只是把它显出来 —— 切过去直接是最终状态，没有首帧黑闪、
+              没有开关先闪默认值再跳真实值，也没有「切过去才拉伸」的跳变。
+              刻意不用 display:none 隐藏：那样隐藏期间元素没有几何尺寸，留空量不出来，
+              只能等切过去可见了再量，第一帧必然是未拉伸的。绝对定位 + visibility
+              让它在后台就有真实尺寸（不绘制、不吃鼠标），启动时一次量准。
+              弹窗/输入框等状态也随挂载保留（与 hideToTray 的 visibility 思路一致） */}
+          {/* data-settings-hidden：隐藏期间禁掉子树全部过渡 —— visibility 是继承属性，
+              子元素 .chip/.btn 的 transition: all 会把 visibility 纳入过渡，向 hidden 过渡
+              期间保持可见、结束才隐藏（切走时标签残留 0.2s）。规则见 index.css */}
+          <div
+            className="absolute inset-0"
+            data-settings-hidden={activeView === 'settings' ? undefined : ''}
+            style={{ visibility: activeView === 'settings' ? undefined : 'hidden' }}
+          >
+            <SettingsView />
+          </div>
         </div>
       </main>
 

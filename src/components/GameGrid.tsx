@@ -343,9 +343,12 @@ export default function GameGrid({
               onDragStart={(e) => e.preventDefault()}
             >
               {rowGames.map((game, colIndex) => {
-                // 延迟按卡片在当前可见批次里的位置算，不用全局索引
+                // 延迟按卡片在当前挂载批次里的位置算，不用全局索引 —— 滚动后
+                // 新挂载的行从批次头重新计数，拿不到几秒的大延迟。
+                // 不设上限：封顶会把后半段卡片压到同一时刻开始动画，看起来
+                // 「后半段瞬间一起出现」。序号只覆盖可见行，波浪自然收束
                 const delay = introWindow
-                  ? Math.min((vRowIdx * colCount + colIndex) * 40, 440)
+                  ? (vRowIdx * colCount + colIndex) * 35
                   : 0;
                 const globalIndex = row.index * colCount + colIndex;
                 return (

@@ -226,9 +226,12 @@ html.app-blank body > * { visibility: hidden; }
   50% { transform: translateY(-4px); }
 }
 
+/* 内容入场：柔和滑入。位移仅 8px、无缩放 —— 大位移 + scale 两轴同动会像
+   机械「上抬」；曲线用 Material 3 标准减速（初速 0 平滑起步、收尾平滑），
+   感知是内容「浮起」而非「冲出」或「平移」 */
 @keyframes card-enter {
-  from { opacity: 0; transform: translateY(24px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fade-up { animation: fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
@@ -407,7 +410,7 @@ html.app-blank body > * { visibility: hidden; }
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-glass);
   transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-  animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: card-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 .game-card:hover {
@@ -611,7 +614,7 @@ html.app-blank body > * { visibility: hidden; }
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-glass);
   transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-  animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: card-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 .mini-card:hover {
@@ -969,7 +972,7 @@ html:not(.dark) .hero-title { text-shadow: none; }
 .poster-card {
   position: relative;   /* 悬停时提层，投影不会被相邻卡片的实心底盖住 */
   cursor: pointer;
-  animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: card-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
 }
 .poster-card:hover { z-index: 2; }
 
@@ -1663,7 +1666,7 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
 
 /* 音乐库行入场渐出：与游戏库封面同款 card-enter（translateY + scale + 淡入） */
 .music-row-enter {
-  animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: card-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 /* 音乐库行手柄选中：收敛高亮 —— 覆盖通用 .gamepad-focus 的大外扩框
@@ -2132,7 +2135,7 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
   border: 1px solid transparent;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease;
-  animation: card-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: card-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 /* 悬停 / 手柄聚焦：整行高亮 + 左侧色条 */
@@ -2291,6 +2294,174 @@ html:not(.dark) .stats-row-cover { background: #e4e8f0; }
 /* 窄窗口（minWidth 960）：三列压成单列堆叠 */
 @media (max-width: 1200px) {
   .stats-cols { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ─── 设置页（SettingsView）—— 三列 · 统一竖向节奏 ───
+   仿 .stats-* 的多列模式，但列数是恒定的 3，且 2 列降级要第三列跨整行
+   （nth-child 表达不了 --cols 变量），所以直接硬编码 grid-template-columns。
+
+   ▸ 留空系统：整页所有竖向留空只有一个源头 —— --sr-py（行的上下内边距）。
+     卡标题上下、卡片间距、块行内部「说明 ↔ 控件」的距离都按固定比例从它派生，
+     调一个数整页节奏一起动。--sr-py 由 useSettingsRhythm 实测「各列内容量 vs
+     可用高度」算出（9~18px，取最挤那列的上限）—— 全局只有一个值，同一种行在任何卡、
+     任何列里高度都相同；窗口越高留空越大，越矮越收紧，收到下限还装不下才由列自己滚动。
+   ▸ 铺到底：三列都要贴住容器底沿。收完节奏后每列剩下的余量由 JS 按各卡自然高比例
+     分给 flex-grow（等于把整列等比放大），多出来的高度落在卡的上下两端 ——
+     行一律不变形。余量绝不允许灌进某一行：那正是「这行 46px、那行 200px」的来历。 */
+.settings-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px 14px;
+
+  --sr-py: 11px;                               /* 行上下内边距：JS 动态覆盖，下面全跟它走 */
+  --sr-px: 20px;                               /* 行左右内边距（固定，不参与动态） */
+  --sr-gap-text: 3px;                          /* 行内：标签 ↔ 说明。固定 —— 这俩是一对，
+                                                  跟着 py 一起变大会削弱配对关系 */
+  --sr-gap-ctl: calc(var(--sr-py) * 0.72);     /* 块行：说明 ↔ 控件 */
+  --sr-title-pt: calc(var(--sr-py) + 1px);     /* 卡标题上（和上一张卡拉开） */
+  --sr-title-pb: calc(var(--sr-py) * 0.5);     /* 卡标题下（贴住自己的第一行） */
+  --sr-card-gap: calc(var(--sr-py) * 0.9);     /* 卡片之间 */
+  --sr-row-min: calc(var(--sr-py) * 2 + 22px); /* 行最小高：只有一行标签也不至于压扁 */
+}
+
+/* 卡片：自然高是基准，flex-grow 由 JS 逐卡设置（列装不下时保持 0，退回滚动）。
+   拉伸多出来的高度落在卡的上下两端 —— justify-content 把「标题 + 行组」整体居中，
+   行本身不参与拉伸（留空系统的底线） */
+.set-card {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.set-card-title {
+  flex: none;
+  padding: var(--sr-title-pt) var(--sr-px) var(--sr-title-pb);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+/* 行列表单独一层：第一行的顶线靠 :first-child 去掉，卡标题不能算进兄弟序列 */
+.set-card-body {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 标准行：标签(+说明) 左、控件右。高度只由内容决定 */
+.set-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: var(--sr-row-min);
+  padding: var(--sr-py) var(--sr-px);
+  border-top: 1px solid var(--color-border-glass);
+}
+.set-row:first-child { border-top: none; }
+
+/* 块行（引擎、API Key、补封面）：内容自己排版，只共用行的内边距和分隔线 */
+.set-row-block { display: block; }
+
+.set-row-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sr-gap-text);
+}
+.set-row-label { font-size: 14px; font-weight: 500; line-height: 1.4; }
+.set-row-desc { font-size: 12px; line-height: 1.5; color: var(--color-text-secondary); }
+
+.set-row-ctl {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* 块行内部三段：图标标题 → 说明 → 控件，间距同样从 --sr-py 派生 */
+.set-blk-head { display: flex; align-items: center; gap: 10px; }
+.set-blk-title { font-size: 14px; font-weight: 500; line-height: 1.4; }
+.set-blk-desc {
+  margin-top: var(--sr-gap-text);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+.set-blk-ctl { margin-top: var(--sr-gap-ctl); }
+.set-blk-note {
+  margin-top: var(--sr-gap-ctl);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 卡内尾巴（手柄连接状态、库说明）：与行同一套内边距和分隔线 */
+.set-tail {
+  flex: none;
+  padding: var(--sr-py) var(--sr-px);
+  border-top: 1px solid var(--color-border-glass);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.set-tail-flex { display: flex; align-items: center; gap: 10px; }
+
+/* 关于卡：整块内容，段间距同样跟着 py 走 */
+.set-about {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--sr-py) * 1.1);
+  padding: calc(var(--sr-py) + 3px) var(--sr-px);
+}
+
+/* 设置页隐藏期间禁掉子树全部过渡：visibility 是继承属性，容器变 hidden 时子元素
+   的 computed visibility 跟着变，带 transition: all 的元素（.chip/.btn 0.2s、
+   transition-all 按钮）会把 visibility 纳入过渡 —— 向 hidden 过渡期间保持可见、
+   过渡结束才隐藏，于是卡片已消失、只剩标签悬在新视图背景上。禁掉过渡后
+   visibility 立即生效；切回设置页时属性移除，过渡照常（visible 方向本就立即翻转） */
+[data-settings-hidden] *,
+[data-settings-hidden] { transition: none !important; }
+
+.settings-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-col {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sr-card-gap);
+  /* 列即唯一滚动容器：常规窗口靠 --sr-py 收紧就装得下、不触发；极矮窗口兜底 */
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-accent) 40%, transparent) transparent;
+}
+.settings-col::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  border-radius: 4px;
+}
+
+@media (max-width: 1500px) {
+  .settings-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* 第三列（封面/数据/关于）跨整行，2 列布局下依然铺满 */
+  .settings-cols > .settings-col:nth-child(3) { grid-column: 1 / -1; }
+}
+@media (max-width: 1100px) {
+  .settings-cols { grid-template-columns: minmax(0, 1fr); }
+  .settings-cols > .settings-col:nth-child(3) { grid-column: auto; }
 }
 
 /* 从托盘唤回时跳过入场动画：与已有 [data-skip-animations] 规则同理 */

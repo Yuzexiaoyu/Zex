@@ -138,7 +138,8 @@ function TargetItem({ active, icon, label, badge, action, onClick }: {
   return (
     <div
       className={[
-        'flex items-center gap-1 pl-3 pr-2 rounded-lg border transition-all',
+        // transition-none：悬停背景要立即出现（transition-all 会让半透明白渐浮现出）
+        'flex items-center gap-1 pl-3 pr-2 rounded-lg border transition-none',
         active
           ? 'bg-[rgba(0,212,255,0.12)] border-[rgba(0,212,255,0.28)] text-[#00d4ff]'
           : 'border-transparent text-text-secondary hover:bg-bg-surface-active hover:text-text-primary',
@@ -184,10 +185,7 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
   // 出厂默认那一份。只用来判断当前值有没有被改过 —— 一致就不给「恢复默认」按钮
   const [defaults, setDefaults] = useState<ProfileConfig | null>(null);
 
-  const current = targets.find((x) => x.id === targetId);
   const isGlobal = targetId === api.RTSS_GLOBAL;
-  // 跟随全局 = 这个游戏还没有自己的 profile 文件。此时下面显示的是全局的值，只读
-  const inherited = !isGlobal && current !== undefined && !current.has_own_profile;
   // 两边都读到了、且真有差异才算「改过」。默认状态下按钮没有意义，藏起来
   const changed = cfg !== null && defaults !== null && !sameConfig(cfg, defaults);
 
@@ -228,12 +226,13 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
   /** 改一项就落盘一次。跟随全局的游戏在这一下自动转成单独设置 —— 写盘本身就是建 profile */
   const patch = (next: Partial<ProfileConfig>) => {
     if (!cfg) return;
-    const becomesOwn = inherited;
     const merged = { ...cfg, ...next };
     setCfg(merged);
     api
       .rtssWriteProfile(targetId, merged)
-      .then(() => (becomesOwn ? reloadTargets() : undefined))
+      // 每次落盘都刷新 targets 列表：任何改动都可能翻转该游戏「与全局相同」的判定，
+      // 「单独设置」角标和「恢复跟随全局」按钮的显隐都依赖列表里的 same_as_global
+      .then(() => reloadTargets())
       .catch(fail);
   };
 
@@ -338,9 +337,12 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
                   active={x.id === targetId}
                   icon={<Gamepad2 size={15} />}
                   label={x.name}
-                  badge={x.has_own_profile ? t('settings.rtssOwnProfile') : undefined}
+                  badge={
+                    // 内容与全局相同 = 没有实际意义上的「单独设置」，角标不显示
+                    x.has_own_profile && !x.same_as_global ? t('settings.rtssOwnProfile') : undefined
+                  }
                   action={
-                    x.id === targetId && x.has_own_profile
+                    x.id === targetId && x.has_own_profile && !x.same_as_global
                       ? { label: t('settings.rtssBackToGlobal'), run: () => void backToGlobal() }
                       : undefined
                   }

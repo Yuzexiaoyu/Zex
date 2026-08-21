@@ -565,6 +565,8 @@ export interface ProfileTargetInfo {
   name: string;
   /** 有自己的 profile 文件 = 单独设置；false = 跟随全局 */
   has_own_profile: boolean;
+  /** 自己的 profile 内容与全局逐项相同（此时「单独设置」/「恢复跟随全局」都不显示） */
+  same_as_global: boolean;
 }
 
 /** 全局配置对象的固定 id（与后端 GLOBAL_TARGET 对应） */

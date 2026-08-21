@@ -1,6 +1,5 @@
 // 设置页词条（src/views/SettingsView.tsx）
 export const zh: Record<string, string> = {
-  'settings.title': '设置',
   'settings.appearance': '外观',
 
   'settings.theme': '主题',
@@ -111,6 +110,8 @@ export const zh: Record<string, string> = {
   'settings.version': '版本 {v}',
   'settings.aboutText': 'ZEX 是一款本地游戏、影视与音乐库管理工具。游戏库支持 Steam 扫描与手动添加、封面自动搜索、游玩时长追踪；影视与音乐由内置 mpv 播放器驱动，支持剧集连播、进度记录与播放控制；最小化到托盘后照常后台记录，可随时从托盘菜单唤回并切换库，支持 Xbox / PS 手柄全程导航。',
   'settings.github': 'GitHub 仓库',
+  'settings.bilibili': '哔哩哔哩',
+  'settings.youtube': 'YouTube',
 
   // 弹窗 / 提示消息
   'settings.guideRegFail': '设置已保存，但注册表写入失败：Game Bar 可能仍会抢占西瓜键，请稍后重试',
@@ -231,7 +232,6 @@ export const zh: Record<string, string> = {
 };
 
 export const en: Record<string, string> = {
-  'settings.title': 'Settings',
   'settings.appearance': 'Appearance',
 
   'settings.theme': 'Theme',
@@ -342,6 +342,8 @@ export const en: Record<string, string> = {
   'settings.version': 'Version {v}',
   'settings.aboutText': 'ZEX is a local library manager for games, series and music. The Games library supports Steam scanning, manual adding, automatic cover search and playtime tracking; Series and Music are powered by the built-in mpv player with auto-play of episodes, progress tracking and playback control. Minimized to the tray it keeps recording in the background and can be brought back anytime from the tray menu, with full Xbox / PS gamepad navigation.',
   'settings.github': 'GitHub repository',
+  'settings.bilibili': 'Bilibili',
+  'settings.youtube': 'YouTube',
 
   'settings.guideRegFail': 'Setting saved, but the registry write failed: Game Bar may still steal the Xbox button; retry later',
   'settings.autostartRegOnFail': 'Registry write failed; launch at startup was not enabled',

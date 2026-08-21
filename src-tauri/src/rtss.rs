@@ -958,6 +958,9 @@ pub struct ProfileTargetInfo {
     pub name: String,
     /// 有自己的 profile 文件 = 单独设置；false = 跟随全局。全局对象恒为 true
     pub has_own_profile: bool,
+    /// 自己的 profile 内容与全局逐项相同 —— 此时「单独设置」/「恢复跟随全局」都没有实际
+    /// 意义（删不删文件行为一样），前端据此隐藏这两个入口。全局对象恒为 false
+    pub same_as_global: bool,
 }
 
 fn resolve_target(state: &AppState, target: &str) -> AppResult<ProfileTarget> {
@@ -1006,10 +1009,14 @@ pub fn rtss_open_download_page() -> AppResult<()> {
 #[tauri::command(async)]
 pub fn rtss_list_targets(app: AppHandle, state: State<'_, AppState>) -> AppResult<Vec<ProfileTargetInfo>> {
     let rtss_dir = require_rtss(&app)?;
+    // 全局只读一次，逐游戏比较「内容与全局是否相同」。N 个游戏各读一个 ~1KB 的
+    // cfg 再比一次 PartialEq，毫秒级，面板打开一次足够
+    let global_cfg = read_profile(&rtss_dir, &ProfileTarget::Global);
     let mut out = vec![ProfileTargetInfo {
         id: GLOBAL_TARGET.to_string(),
         name: "global".to_string(), // 前端自己按语言显示
         has_own_profile: true,
+        same_as_global: false,
     }];
     let conn = state.db.lock();
     let mut stmt = conn.prepare(
@@ -1024,10 +1031,13 @@ pub fn rtss_list_targets(app: AppHandle, state: State<'_, AppState>) -> AppResul
         if profile.is_empty() {
             continue; // 没有启动程序就没法按 exe 名匹配 profile
         }
+        let target = ProfileTarget::Game(profile);
+        let has_own = target.path(&rtss_dir).exists();
         out.push(ProfileTargetInfo {
             id,
             name,
-            has_own_profile: ProfileTarget::Game(profile).path(&rtss_dir).exists(),
+            has_own_profile: has_own,
+            same_as_global: has_own && read_profile(&rtss_dir, &target) == global_cfg,
         });
     }
     Ok(out)

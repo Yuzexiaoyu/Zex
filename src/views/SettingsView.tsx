@@ -638,6 +638,10 @@ export default function SettingsView() {
     setShowClearConfirm(false);
     setClearing(true);
     try {
+      // 先停掉正在播放的音乐（清 UI 播放条 + 让 mpv 退出，桌面歌词随 mpv-closed 自关）。
+      // 不停的话播放条会一直显示一首库里已不存在的曲目（进度事件还在推）。
+      // mpv 空闲时 mpv_quit 也安全（send_to_session 失败被吞，恒 Ok）
+      await useAppStore.getState().stopMusic();
       await api.clearAllData();
       await Promise.all([loadGames(), loadSeries(), loadTracks(), loadPlaylists()]);
       await message(t('settings.cleared'), { title: t('common.success'), kind: 'info' });

@@ -206,6 +206,20 @@ export default function App() {
     return () => { cancelled = true; unlisten?.(); };
   }, []);
 
+  // 启动后台把存量音乐封面压成小图（改了 cover_path 与 updated_at）。曲目列表只在
+  // MusicView 挂载和启动预载时拉，不重拉的话要重进音乐库才看到新封面
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      const stop = await listen<number>('music-covers-migrated', () => {
+        useAppStore.getState().loadTracks().catch(() => {});
+      });
+      if (cancelled) stop(); else unlisten = stop;
+    })();
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
   // 唤回窗口：先恢复内容区 → 等浏览器合成完这一帧 → 才让后端 show()。
   // 顺序反了就会闪出隐藏前的旧画面（窗口 hide 期间 WebView2 不合成新帧）
   const restoreWindow = useCallback(() => {

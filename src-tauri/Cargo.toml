@@ -63,3 +63,10 @@ lofty = "0.24"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+
+# 依赖在 dev profile 下也开优化。start.bat 跑的是 debug 产物，而存量音乐封面降级
+# 要解几百张 1920² PNG —— 未优化的 png/miniz_oxide 解码循环慢一个量级（单张数秒，
+# 整轮要十几分钟）。只作用于依赖，本 crate 仍是 debug，断点/回溯照常。
+# 代价：首次编译要把依赖全部重编一遍
+[profile.dev.package."*"]
+opt-level = 3

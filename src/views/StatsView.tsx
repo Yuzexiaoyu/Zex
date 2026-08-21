@@ -102,7 +102,7 @@ function ColSection({ stats, section, colOrder, onOpenMenu }: {
   return (
     <section className="stats-col" style={{ ['--cc' as string]: section.color }}>
       <div className="stats-col-head">
-        <h2><Icon size={15} />{section.label}</h2>
+        <h2><Icon size={15} />{t(section.label)}</h2>
         <span className="stats-col-total">{longDur(d.total_seconds)}</span>
       </div>
 

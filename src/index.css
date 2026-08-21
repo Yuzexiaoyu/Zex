@@ -2604,14 +2604,11 @@ html:not(.dark) .detail-backdrop-fallback {
 .lyrics-toolbar {
   position: absolute;
   top: 6px;
-  right: 10px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 2;
   display: flex;
   gap: 4px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-.lyrics-root:hover .lyrics-toolbar {
   opacity: 1;
 }
 .lyrics-toolbar button {
@@ -2636,11 +2633,14 @@ html:not(.dark) .detail-backdrop-fallback {
   color: #000;
 }
 
-/* 锁定态悬停浮出的解锁钮：小、半透、无框，鼠标移上去才变实（刻意不显眼） */
+/* 锁定态悬停才浮出的解锁钮：默认完全隐藏，光标进入歌词窗范围时后端广播
+   lyrics-unlock-hover（穿透态 webview 收不到鼠标事件，:hover 不可靠），
+   前端挂 lyrics-unlock-show 类浮出。刻意小、无框、不显眼 */
 .lyrics-unlock {
   position: absolute;
   top: 6px;
-  right: 10px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 3;
   width: 22px;
   height: 22px;
@@ -2652,8 +2652,11 @@ html:not(.dark) .detail-backdrop-fallback {
   justify-content: center;
   color: rgba(255, 255, 255, 0.7);
   background: rgba(16, 18, 26, 0.4);
-  opacity: 0.45;
+  opacity: 0;
   transition: opacity 0.15s ease, background 0.15s ease;
+}
+.lyrics-unlock-show {
+  opacity: 1;
 }
 .lyrics-unlock:hover {
   opacity: 1;

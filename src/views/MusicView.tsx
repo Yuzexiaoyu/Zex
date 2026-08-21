@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ask, message } from '@tauri-apps/plugin-dialog';
 import { createPortal } from 'react-dom';
@@ -137,15 +137,6 @@ export default function MusicView() {
   } | null>(null);
   const [liveTracks, setLiveTracks] = useState<Track[] | null>(null);
   const [everDragged, setEverDragged] = useState(false);
-  // 入场动画只属于「视图刚出现」这件事，不属于某一行。虚拟滚动下行会反复挂载，
-  // 若按行索引判断，滚开再滚回顶部这些行会重新播一次动画。用挂载时刻做窗口：
-  // 700ms（动画 400ms + 首屏错位延迟 440ms 的余量）之后一律不再加动画类
-  const [introDone, setIntroDone] = useState(false);
-  useEffect(() => {
-    const id = setTimeout(() => setIntroDone(true), 700);
-    return () => clearTimeout(id);
-  }, []);
-  const introWindow = !introDone;
   const dragRef = useRef<NonNullable<typeof drag>>(null);
   const liveRef = useRef<Track[] | null>(null);
   const dragEnabled = sort === 'custom' && !query.trim() && filter === 'all' && !multiSelect;
@@ -154,6 +145,34 @@ export default function MusicView() {
   // 点击行就无法播放/多选了
   const dragging = drag?.active === true;
   const displayList = liveTracks ?? baseList;
+
+  // ─── 入场动画 ─────────────────────────────
+  // 入场动画只属于「视图刚出现的首屏那批行」，不属于某一行。虚拟滚动下行会反复挂载，
+  // 所以有两条硬约束：
+  //   1) 延迟必须按绝对行号算。用「本批虚拟行里的序号」算的话，批次窗口一滑动，
+  //      已挂载行的 animation-delay 就被改写 —— 浏览器会重算动画本地时间、把运行中
+  //      的动画拽回起始相位，整行连封面一起重闪一遍
+  //   2) 只有首屏那批行能拿动画。card-enter 是 both 填充，延迟期内 opacity:0；
+  //      滚动挂载进来的行若也加动画，行号一大就是几百 ms 的透明期 —— 那正是
+  //      「入场没播完往下滚一片空白」
+  const [introRows, setIntroRows] = useState(0);
+  const [introDone, setIntroDone] = useState(false);
+  // 首屏能放几行。用 layout effect 而非 effect：它在首帧绘制前跑，setState 触发的
+  // 重渲染也在绘制前完成。首帧 listRef 还是 null、虚拟化器量不到高度 → 一行都不渲染，
+  // 所以不存在「先画了没动画的行、再补上动画」的闪
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (el) setIntroRows(Math.ceil(el.clientHeight / ROW_H));
+  }, []);
+  // 窗口长度按首屏行数推（最后一行的延迟 + 动画 300ms + 余量），写死短了会把尾部行
+  // 掐停在半透明。起算点是「行真正出现」而不是挂载 —— loadTracks 慢于窗口时
+  // 整个入场动画会一次都没播就过期
+  const hasRows = displayList.length > 0;
+  useEffect(() => {
+    if (!introRows || !hasRows) return;
+    const id = setTimeout(() => setIntroDone(true), introRows * 30 + 420);
+    return () => clearTimeout(id);
+  }, [introRows, hasRows]);
 
   // ─── 指针高亮 ─────────────────────────────
   // 不走 CSS :hover —— Chromium 滚动时不刷新 hover 命中测试，滚轮滚动会把高亮
@@ -206,6 +225,9 @@ export default function MusicView() {
     paintHl();
   };
   const onListScroll = () => {
+    // 首次滚动即结束入场：首屏行往回滚会重挂载，窗口还没过期的话会再播一次动画
+    // （= 又一次空白）。已在动画中的行随类名撤销直接落到终态，不闪
+    if (!introDone) setIntroDone(true);
     scrollingRef.current = true;
     hideHl(); // 同步熄灭，不等 rAF
     if (scrollIdleRef.current) window.clearTimeout(scrollIdleRef.current);
@@ -553,10 +575,12 @@ export default function MusicView() {
           </div>
         ) : (
           <div className="relative w-full" style={{ height: rowVirtualizer.getTotalSize() }}>
-            {rowVirtualizer.getVirtualItems().map((vRow, vIdx) => {
+            {rowVirtualizer.getVirtualItems().map((vRow) => {
               const trk = displayList[vRow.index];
               const idx = vRow.index;
               if (!trk) return null;
+              // 入场动画只发给首屏那批行，且延迟按绝对行号算（见上方 introRows 注释）
+              const introRow = !everDragged && !introDone && idx < introRows;
               return (
               // 外层只管虚拟定位：card-enter 入场动画会动 transform，
               // 与定位 transform 写在同一元素上会互相覆盖 → 行飞到错位置
@@ -570,8 +594,7 @@ export default function MusicView() {
                   // 行本身不带 hover 背景 —— 悬停高亮由列表外壳上的 .music-hl
                   // 高亮块负责（CSS :hover 在滚动时不刷新，会粘在旧行上）
                   'music-row group flex items-center gap-3 px-4 h-full rounded-xl border border-transparent cursor-pointer',
-                  // 只在挂载后的入场窗口内加动画，之后滚动挂载的行不带动画
-                  !everDragged && introWindow && 'music-row-enter',
+                  introRow && 'music-row-enter',
                   dragEnabled && 'touch-none select-none', // 拖拽时防原生拖拽/选字；光标保持 pointer（点击=播放）
                   drag?.active && drag.id === trk.id && 'cursor-grabbing', // 正在拖动的行显示抓握
                   idx === listFocused && 'gamepad-focus',
@@ -579,11 +602,11 @@ export default function MusicView() {
                   trk.id === playingTrackId && 'music-row-playing', // 当前播放行：底色 + 左侧竖条
                 )}
                 style={{
-                  // 错位延迟按行在当前挂载批次中的序号算，不用全局 idx —— 否则从中间
-                  // 挂载的行会拿到几秒的延迟，出现「空白等半天才淡入」。
+                  // 用绝对行号而非批内序号：批内序号会随虚拟窗口滑动改写，
+                  // 改写运行中动画的 delay 会把它拽回起始相位 → 整行重闪。
                   // 不设上限：封顶会把后半段行压到同一时刻开始动画，看起来
-                  // 「后半段瞬间一起出现」。序号只覆盖可见行，波浪自然收束
-                  animationDelay: !everDragged && introWindow ? `${vIdx * 30}ms` : undefined,
+                  // 「后半段瞬间一起出现」；范围已由 idx < introRows 收在首屏内
+                  animationDelay: introRow ? `${idx * 30}ms` : undefined,
                 }}
                 onClick={() => {
                   if (multiSelect) toggleSelect(trk.id);

@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useAppStore } from '../store';
@@ -74,15 +74,28 @@ export default function GameGrid({
   const setLiveBoth = (arr: Game[] | null) => { liveRef.current = arr; setLiveItems(arr); };
   // 首次拖拽后永久抑制卡片入场动画（拖拽中切掉 animation:none 会让所有卡片重播渐出）
   const [everDragged, setEverDragged] = useState(false);
-  // 入场动画属于「视图刚出现」，不属于某张卡。虚拟滚动下卡片会反复挂载，
-  // 按全局索引算延迟会让滚到深处的卡拿到几秒延迟（先空白再淡入）。
-  // 用挂载时刻做窗口，过期后不再传 animationDelay
+  // 入场动画只属于「视图刚出现的首屏那批卡」，不属于某张卡。虚拟滚动下卡片会反复挂载，
+  // 所以有两条硬约束（与音乐库 MusicView 同源）：
+  //   1) 延迟必须按绝对格号算。用「本批虚拟行里的序号」算的话，批次窗口一滑动，
+  //      已挂载卡的 animation-delay 就被改写 —— 浏览器重算动画本地时间、把运行中的
+  //      动画拽回起始相位，整张卡连封面一起重闪
+  //   2) 只有首屏那批卡能拿动画。card-enter 是 both 填充，延迟期内 opacity:0；
+  //      滚动挂载进来的卡若也加动画，格号一大就是几百 ms 的透明期 = 滚下去一片空白
+  const [introCells, setIntroCells] = useState(0);
   const [introDone, setIntroDone] = useState(false);
+  // 首屏放得下几格。layout effect：首帧绘制前跑，且首帧虚拟化器量不到高度、
+  // 一张卡都不渲染，所以不存在「先画了没动画的卡再补动画」的闪
+  useLayoutEffect(() => {
+    const el = parentRef.current;
+    if (el) setIntroCells(Math.ceil(el.clientHeight / (rowHeight + gap)) * colCount);
+  }, [colCount]);
+  // 窗口长度按首屏格数推（末格延迟 + 动画 300ms + 余量），写死短了会把尾部卡掐停在半透明
+  const hasCards = games.length > 0;
   useEffect(() => {
-    const id = setTimeout(() => setIntroDone(true), 700);
+    if (!introCells || !hasCards) return;
+    const id = setTimeout(() => setIntroDone(true), introCells * 35 + 420);
     return () => clearTimeout(id);
-  }, []);
-  const introWindow = !introDone;
+  }, [introCells, hasCards]);
   // 松手落位锁：与状态更新同一批次提交，确保禁过渡帧在 drop 提交时真正生效
   // （旧的命令式 classList.add 会在 React 重写 className 时被抹掉，从未生效过 → 松手一直抽动）
   const [dropLock, setDropLock] = useState(false);
@@ -313,6 +326,9 @@ export default function GameGrid({
       className="h-full overflow-y-auto overflow-x-hidden"
       style={{ paddingLeft: padX, paddingRight: padX }}
       onContextMenu={handleBlankContextMenu}
+      // 首次滚动即结束入场：滚动挂载进来的卡直接走 drag-suppress 的 animation:none
+      // （card-enter 是 both，关掉动画直接呈现终态，不闪），首屏卡往回滚也不会重播
+      onScroll={introDone ? undefined : () => setIntroDone(true)}
     >
       <div
         ref={spacerRef}
@@ -321,12 +337,12 @@ export default function GameGrid({
           // 入场窗口过期后复用 drag-suppress：animation:none 让滚动挂载的卡不再重播入场
           // （card-enter 是 both，关掉动画直接呈现终态，不会闪）；它连带的 :hover 压制也正是
           // 需要的 —— 动画一关，原本压制悬停上浮的保留帧就消失了，得显式压回才和入场时一致
-          (everDragged || !introWindow) && 'drag-suppress',
+          (everDragged || introDone) && 'drag-suppress',
           dropLock && 'drop-instant',
         )}
         style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}
       >
-        {virtualizer.getVirtualItems().map((row, vRowIdx) => {
+        {virtualizer.getVirtualItems().map((row) => {
           const start = row.index * colCount;
           const rowGames = displayGames.slice(start, start + colCount);
           return (
@@ -343,14 +359,13 @@ export default function GameGrid({
               onDragStart={(e) => e.preventDefault()}
             >
               {rowGames.map((game, colIndex) => {
-                // 延迟按卡片在当前挂载批次里的位置算，不用全局索引 —— 滚动后
-                // 新挂载的行从批次头重新计数，拿不到几秒的大延迟。
-                // 不设上限：封顶会把后半段卡片压到同一时刻开始动画，看起来
-                // 「后半段瞬间一起出现」。序号只覆盖可见行，波浪自然收束
-                const delay = introWindow
-                  ? (vRowIdx * colCount + colIndex) * 35
-                  : 0;
                 const globalIndex = row.index * colCount + colIndex;
+                // 用绝对格号而非批内序号：批内序号会随虚拟窗口滑动改写，改写运行中
+                // 动画的 delay 会把它拽回起始相位 → 整张卡重闪。
+                // 不设上限：封顶会把后半段卡片压到同一时刻开始动画，看起来
+                // 「后半段瞬间一起出现」；范围已由 globalIndex < introCells 收在首屏内
+                const introCell = !everDragged && !introDone && globalIndex < introCells;
+                const delay = introCell ? globalIndex * 35 : 0;
                 return (
                   <GameCard
                     key={game.id}

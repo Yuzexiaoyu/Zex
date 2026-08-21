@@ -33,6 +33,10 @@ function DesktopLyricsBody() {
   const [idx, setIdx] = useState(-1);
   const [fontSize, setFontSize] = useState(FONT_DEFAULT);
   const [locked, setLocked] = useState(false);
+  // 锁定态解锁钮的悬停显隐：穿透时 webview 收不到鼠标事件，只能由后端轮询线程
+  // 广播（光标进/出歌词窗 → lyrics-unlock-hover）。opacity 切换而非卸载，
+  // 隐藏期间按钮仍需有布局 rect 供热区测量上报
+  const [unlockHover, setUnlockHover] = useState(false);
   // locked 的 ref 镜像（事件回调注册一次，读 state 会闭包过期）
   const lockedRef = useRef(false);
   const unlockBtnRef = useRef<HTMLButtonElement>(null);
@@ -103,7 +107,7 @@ function DesktopLyricsBody() {
       const win = getCurrentWindow();
       const [scale, outer] = await Promise.all([win.scaleFactor(), win.outerPosition()]);
       const r = el.getBoundingClientRect();
-      const pad = 4 * scale; // 热区外扩一点，小按钮好够
+      const pad = 8 * scale; // 热区外扩多一点，小按钮好点中
       await invoke('set_lyrics_unlock_hotspot', {
         x: Math.round(outer.x + r.left * scale - pad),
         y: Math.round(outer.y + r.top * scale - pad),
@@ -155,7 +159,13 @@ function DesktopLyricsBody() {
         // 停止播放 / 影视接管：歌词窗一起关（产品决策）
         listen<void>('mpv-closed', hide),
         listen<void>('mpv-ready', hide),
-        listen<boolean>('lyrics-lock-changed', (e) => setLocked(e.payload)),
+        listen<boolean>('lyrics-lock-changed', (e) => {
+          setLocked(e.payload);
+          // 解锁后轮询线程退出，悬停状态可能残留 true；重锁时按钮默认隐藏，
+          // 光标若恰在热区由轮询广播在 ~120ms 内校正回显示
+          setUnlockHover(false);
+        }),
+        listen<boolean>('lyrics-unlock-hover', (e) => setUnlockHover(e.payload)),
         listen<boolean>('lyrics-visibility-changed', (e) => {
           visibleRef.current = e.payload;
           if (e.payload) {
@@ -221,19 +231,21 @@ function DesktopLyricsBody() {
         </div>
         <div className="lyrics-line lyrics-next">{next ? next.text || '···' : ''}</div>
       </div>
-      {/* 锁定态常驻的半透小锁钮：整条歌词只有它能吃住点击（后端只放行它的热区），
-          点了即解锁；其余区域点击全部穿透到后面的窗口 */}
+      {/* 锁定态的解锁钮：平时隐藏（opacity 0），光标进入歌词窗范围时由后端
+          广播浮出（穿透态 webview 收不到鼠标事件，见 lyrics-unlock-hover）。
+          整条歌词只有它能吃住点击（后端只放行它的热区），点了即解锁；
+          其余区域点击全部穿透到后面的窗口 */}
       {locked && (
         <button
           ref={unlockBtnRef}
-          className="lyrics-unlock"
+          className={`lyrics-unlock${unlockHover ? ' lyrics-unlock-show' : ''}`}
           onClick={() => void invoke('set_desktop_lyrics_locked', { locked: false }).catch(() => {})}
           title={t('misc.unlockLyrics')}
         >
           <Lock size={11} />
         </button>
       )}
-      {/* 悬停工具栏：锁定时整窗鼠标穿透，工具栏理论上也到不了，双保险不渲染 */}
+      {/* 常驻工具栏（解锁态）：锁定时整窗鼠标穿透，工具栏理论上也到不了，双保险不渲染 */}
       {!locked && (
         <div className="lyrics-toolbar">
           <button onClick={() => changeFont(-2)} title={t('misc.fontSmaller')}>A-</button>

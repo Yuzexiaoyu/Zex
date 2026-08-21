@@ -6128,12 +6128,30 @@ fn clear_all_data(state: State<'_, AppState>) -> AppResult<String> {
              DELETE FROM playlists;
              DELETE FROM tracks;",
         )?;
+        // 清掉封面降级迁移的标志位：清数据后下次启动的迁移要能重跑 —— 它现在只剩
+        // 「清理孤儿封面」的职责，正好兜住下面删除失败/残留的文件。settings 其余
+        // 设置项（API Key 等）按设计保留
+        let _ = conn.execute(
+            "DELETE FROM settings WHERE key IN ('music_cover_thumbs_v1','music_cover_thumbs_v2','music_cover_thumbs_v3')",
+            [],
+        );
     }
     let covers_dir = state.data_dir.join("covers");
+    let mut removed = 0usize;
+    let mut failed = 0usize;
     if let Ok(entries) = fs::read_dir(&covers_dir) {
         for entry in entries.flatten() {
-            let _ = fs::remove_file(entry.path());
+            if fs::remove_file(entry.path()).is_ok() {
+                removed += 1;
+            } else {
+                failed += 1;
+            }
         }
+    }
+    if failed > 0 {
+        // 删不掉通常是文件正被占用（杀软扫描、刚启动的迁移线程在读）。不静默：
+        // 下次启动的迁移（标志位已清）会扫掉残留
+        log::warn!("清除封面文件失败 {} 个（可能被占用），已删 {}. 残留文件由下次启动的孤儿清理兜底", failed, removed);
     }
     Ok("所有数据已清除".to_string())
 }
@@ -6483,6 +6501,38 @@ fn parse_audio_tags(path: &Path) -> Option<TrackPreview> {
     })
 }
 
+// 音乐封面在 ZEX 里最大只显示到 48×48（播放条），列表行 44×44，托盘更小。而内嵌
+// 专辑图常是 1600²~1920² 的 5~8MB PNG —— 原样落盘等于让 WebView 为一个 44px 的框
+// 解码 15MB 位图（1920×1920×4），虚拟滚动下行反复挂载就要反复解，这是滚动时封面
+// 闪的根因。统一压到 256px（48px 的 5 倍余量，足够 HiDPI）
+const MUSIC_COVER_MAX: u32 = 256;
+
+// 已解码的图 → ≤256px 的 JPEG 字节。缩放用 thumbnail 而非 resize+Lanczos3：
+// 大比例缩小下两者肉眼无差，但 thumbnail 的快速整数算法在 1920² 上快一个量级
+// （迁移几百张时是几十秒的差别）
+fn encode_cover_jpeg(img: &image::DynamicImage) -> Option<Vec<u8>> {
+    use image::codecs::jpeg::JpegEncoder;
+    use image::{ExtendedColorType, ImageEncoder};
+
+    let scaled = if img.width() > MUSIC_COVER_MAX || img.height() > MUSIC_COVER_MAX {
+        img.thumbnail(MUSIC_COVER_MAX, MUSIC_COVER_MAX) // 等比缩放到框内
+    } else {
+        img.clone()
+    };
+    // JPEG 没有 alpha 通道，带透明的图会丢掉透明度（专辑图里极罕见，接受）
+    let rgb = scaled.to_rgb8();
+    let mut out = Vec::new();
+    JpegEncoder::new_with_quality(&mut out, 88)
+        .write_image(rgb.as_raw(), rgb.width(), rgb.height(), ExtendedColorType::Rgb8)
+        .ok()?;
+    Some(out)
+}
+
+// 把封面字节压成 ≤256px 的 JPEG。解码/编码任一步失败返回 None，调用方退回原字节
+fn shrink_cover(bytes: &[u8]) -> Option<Vec<u8>> {
+    encode_cover_jpeg(&image::load_from_memory(bytes).ok()?)
+}
+
 // 把内嵌封面提取为 data/covers/music_<track_id>.jpg（失败返回空串，不影响入库）
 fn extract_track_cover(data_dir: &Path, file_path: &Path, track_id: &str) -> String {
     use lofty::file::TaggedFileExt;
@@ -6494,19 +6544,176 @@ fn extract_track_cover(data_dir: &Path, file_path: &Path, track_id: &str) -> Str
     let Some(pic) = tagged.primary_tag().and_then(|t| t.pictures().first()) else {
         return String::new();
     };
-    let ext = match pic.mime_type().map(|m| m.as_str()) {
-        Some("image/png") => "png",
-        _ => "jpg",
+    // 正常路径写压缩后的 JPEG；只有解码失败（畸形/罕见格式）才退回原字节 + 原扩展名
+    let (bytes, ext): (Cow<'_, [u8]>, &str) = match shrink_cover(pic.data()) {
+        Some(jpg) => (Cow::Owned(jpg), "jpg"),
+        None => (
+            Cow::Borrowed(pic.data()),
+            match pic.mime_type().map(|m| m.as_str()) {
+                Some("image/png") => "png",
+                _ => "jpg",
+            },
+        ),
     };
     let covers_dir = data_dir.join("covers");
     if fs::create_dir_all(&covers_dir).is_err() {
         return String::new();
     }
     let dest = covers_dir.join(format!("music_{}.{}", track_id, ext));
-    if fs::write(&dest, pic.data()).is_ok() {
+    if fs::write(&dest, &bytes).is_ok() {
         dest.to_string_lossy().to_string()
     } else {
         String::new()
+    }
+}
+
+// 存量封面降级：早期版本把内嵌专辑图原样落盘（实测 519 张共 254MB，单张 1600²~1920²），
+// 音乐库滚动时 WebView 反复解大图 → 封面闪。一次性压成 256px JPEG。
+//
+// 标志位范式抄 rtss::migrate_profile_model：settings 表存一行，成功才落标志位，
+// 有失败就不落、下次启动重试。走 tracks 表驱动，covers/ 里的孤儿图（delete_track
+// 只删库行不删文件）天然不碰
+fn migrate_music_covers(app: &AppHandle, state: &AppState) {
+    // v1 用文件体积判「已是小图」，漏掉了 73 张 500~800px 但压得很小的图；v2 改按像素判；
+    // v3 追加孤儿封面清理（delete_track 只删库行不删文件，历年积累了几百个孤儿）
+    const FLAG: &str = "music_cover_thumbs_v3";
+
+    // 读标志位 + 取任务清单，锁只在这一段里握着 —— 解码/编码是重活，绝不能跨锁
+    let jobs: Vec<(String, String)> = {
+        let conn = state.db.lock();
+        let done: Option<String> = conn
+            .query_row("SELECT value FROM settings WHERE key = ?", [FLAG], |r| r.get(0))
+            .ok();
+        if done.is_some() {
+            return;
+        }
+        let Ok(mut stmt) = conn.prepare("SELECT id, cover_path FROM tracks WHERE cover_path <> ''")
+        else {
+            return;
+        };
+        let Ok(rows) = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))) else {
+            return;
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let mut changed = 0usize;
+    let mut failed = 0usize;
+    for (id, old_path) in &jobs {
+        let old = Path::new(old_path);
+        if !old.exists() {
+            continue; // 文件已不在（用户清过 covers/），没什么可修的
+        }
+        let Ok(bytes) = fs::read(old) else {
+            failed += 1;
+            continue;
+        };
+        // 「已经是小图」按像素判，不按体积。解码成本是像素数（800² 就是 2.6MB 位图），
+        // 而 PNG 对纯色/平涂专辑图压得极狠 —— 实测有 800px 的图只占 196KB、
+        // 720px 的只占 74KB，用体积阈值会把它们全放过去
+        let Some(img) = image::load_from_memory(&bytes).ok() else {
+            log::warn!("封面降级失败（无法解码）：{}", old_path);
+            failed += 1;
+            continue;
+        };
+        if img.width() <= MUSIC_COVER_MAX && img.height() <= MUSIC_COVER_MAX {
+            continue; // 新导入的，或上一轮迁移处理过的
+        }
+        let Some(jpg) = encode_cover_jpeg(&img) else {
+            log::warn!("封面降级失败（无法重编码）：{}", old_path);
+            failed += 1;
+            continue;
+        };
+        let new_path = old.with_extension("jpg");
+        if let Err(e) = fs::write(&new_path, &jpg) {
+            log::warn!("封面降级写入失败 {}：{}", new_path.display(), e);
+            failed += 1;
+            continue;
+        }
+        // 先落库再删旧文件。反过来的话，进程在两步之间被杀（用户关窗/taskkill）会留下
+        // 指向已删文件的 cover_path —— 那张封面就永远是空框了。反着来最坏只是留个孤儿文件。
+        // updated_at 是前端 ?v= 的缓存键（见 utils/media.ts coverSrc），必须一起 bump，
+        // 否则 WebView 拿着强缓存里的旧大图不放
+        let conn = state.db.lock();
+        let updated = conn.execute(
+            "UPDATE tracks SET cover_path = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_path.to_string_lossy().to_string(), Utc::now().to_rfc3339(), id],
+        );
+        drop(conn);
+        if let Err(e) = updated {
+            log::warn!("封面降级落库失败 {}：{}", id, e);
+            let _ = fs::remove_file(&new_path); // 库没改成，新文件是垃圾，撤掉
+            failed += 1;
+            continue;
+        }
+        // 扩展名变了（.png → .jpg）：原文件是纯派生物，源音频还在盘上，删掉不丢数据
+        if new_path != old {
+            let _ = fs::remove_file(old);
+        }
+        changed += 1;
+        // 分批通知前端重拉曲目。旧的 .png 是当场删的 —— 前端还拿着旧 cover_path 时
+        // covers 协议会 404，那一格就是空框。攒够一批就让前端换成新路径，把这个
+        // 窗口压到一两秒，而不是等整轮几十秒跑完
+        if changed % 40 == 0 {
+            log::info!("音乐封面降级进度：{}/{}", changed, jobs.len());
+            let _ = app.emit("music-covers-migrated", changed);
+        }
+        // 单张要读数 MB + 解码 + 编码，连着跑会占满一个核。让一让，反正是后台一次性活
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    if changed > 0 {
+        log::info!("音乐封面降级完成：{} 张（失败 {}）", changed, failed);
+        // 前端只在 MusicView 挂载/启动预载时 loadTracks()，不通知的话要重进库才看到新图
+        let _ = app.emit("music-covers-migrated", changed);
+    }
+
+    // 顺手清理孤儿封面：delete_track 只删库行不删封面文件，历年积累了一堆
+    // covers/music_* 没有任何曲目引用（本次实测 344 个、154MB —— 含本轮转换后
+    // 留下的旧 .png 与早已删除曲目的图）。封面是纯派生物，源音频还在盘上，删了不丢
+    // 数据。与并发导入的竞争窗口不存在：迁移只在启动后 1.5s 跑一次
+    if failed == 0 {
+        let live: std::collections::HashSet<String> = {
+            let conn = state.db.lock();
+            let Ok(mut stmt) =
+                conn.prepare("SELECT cover_path FROM tracks WHERE cover_path <> ''")
+            else {
+                return;
+            };
+            let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else {
+                return;
+            };
+            rows.filter_map(|r| r.ok())
+                .filter_map(|p| Path::new(&p).file_name().map(|f| f.to_string_lossy().to_string()))
+                .collect()
+        };
+        let covers_dir = state.data_dir.join("covers");
+        let mut removed = 0usize;
+        let mut freed = 0u64;
+        if let Ok(entries) = fs::read_dir(&covers_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !name.starts_with("music_") || live.contains(&name) {
+                    continue;
+                }
+                if let Ok(meta) = entry.metadata() {
+                    freed += meta.len();
+                }
+                if fs::remove_file(entry.path()).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+        if removed > 0 {
+            log::info!("清理孤儿音乐封面：{} 个（{} MB）", removed, freed / 1048576);
+        }
+    }
+    if failed == 0 {
+        let conn = state.db.lock();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, '1')",
+            [FLAG],
+        );
     }
 }
 
@@ -7123,8 +7330,10 @@ fn lyrics_set_lock_state(app: &tauri::AppHandle, locked: bool) {
     }
 }
 
-// 锁定悬停轮询：光标进入解锁钮热区 → 临时关穿透（按钮可点）；离开 → 立刻恢复穿透。
-// 热区未上报时退回整条歌词矩形兜底（保证一定有解锁入口）。解锁后线程退出。
+// 锁定悬停轮询：两个独立信号——「显示」光标进整个窗口就浮出解锁钮（前端靠它
+// 才知道该显示，穿透态 webview 收不到鼠标事件）；「放行」只放行解锁钮热区
+// （点击只有按钮能吃住，其余区域保持穿透到后面窗口，锁定防误触语义不变）。
+// 热区未上报时退回整窗兜底（保证一定有解锁入口）。解锁后线程退出。
 // 窗口操作一律 run_on_main_thread 回主线程
 fn lyrics_start_hover_poll(app: &tauri::AppHandle) {
     if LYRICS_HOVER_POLLING.swap(true, Ordering::SeqCst) {
@@ -7132,7 +7341,8 @@ fn lyrics_start_hover_poll(app: &tauri::AppHandle) {
     }
     let app = app.clone();
     std::thread::spawn(move || {
-        let mut revealed = false;
+        let mut revealed = false; // 放行态：光标在解锁钮热区 → 临时关穿透
+        let mut shown = false; // 显示态：光标在窗口内 → 前端浮出解锁钮
         loop {
             std::thread::sleep(std::time::Duration::from_millis(120));
             if !LYRICS_LOCKED.load(Ordering::SeqCst) {
@@ -7144,22 +7354,27 @@ fn lyrics_start_hover_poll(app: &tauri::AppHandle) {
             }
             let mut pt = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
             unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) };
+            // 显示信号：光标在整个歌词窗内 → 前端浮出解锁钮
+            let in_window = match (w.outer_position(), w.outer_size()) {
+                (Ok(p), Ok(s)) => {
+                    pt.x >= p.x
+                        && pt.x < p.x + s.width as i32
+                        && pt.y >= p.y
+                        && pt.y < p.y + s.height as i32
+                }
+                _ => false,
+            };
+            if in_window != shown {
+                shown = in_window;
+                let _ = app.emit("lyrics-unlock-hover", in_window);
+            }
+            // 放行信号：只放行解锁钮热区（热区还没上报时整窗兜底，避免没有解锁入口）
             let hotspot = *LYRICS_UNLOCK_HOTSPOT.lock();
             let inside = match hotspot {
-                // 只放行解锁钮这一小块
                 Some((hx, hy, hw, hh)) => {
                     pt.x >= hx && pt.x < hx + hw && pt.y >= hy && pt.y < hy + hh
                 }
-                // 热区还没上报（锁定瞬间/刚重开）：整条歌词兜底，避免没有解锁入口
-                None => match (w.outer_position(), w.outer_size()) {
-                    (Ok(p), Ok(s)) => {
-                        pt.x >= p.x
-                            && pt.x < p.x + s.width as i32
-                            && pt.y >= p.y
-                            && pt.y < p.y + s.height as i32
-                    }
-                    _ => false,
-                },
+                None => in_window,
             };
             if inside != revealed {
                 revealed = inside;
@@ -7563,6 +7778,15 @@ pub fn run() {
             // 旧模型（一份全局广播到所有 profile）迁到 Global + 单游戏 profile。
             // 必须排在预热判断之前 —— 预热读的就是迁移写出来的 Profiles/Global
             rtss::migrate_profile_model(app.handle(), &app.state::<AppState>());
+
+            // ── 存量音乐封面降级（一次性）──
+            // 早期版本把内嵌专辑图原样落盘，几百张 1600²+ 大图让音乐库滚动时反复解码。
+            // 放后台线程 + 起始让开首帧：单张要读数 MB、解码、重编码，几百张要几十秒
+            let covers_app = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                migrate_music_covers(&covers_app, &covers_app.state::<AppState>());
+            });
 
             // ── RTSS 预热 ──
             // 与 mpv 预热同款：后台先把 RTSS 拉起来（含托盘图标秒删），点游戏时

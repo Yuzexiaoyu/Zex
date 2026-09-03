@@ -183,11 +183,12 @@ export interface DiskVolume {
   drive: string;        // 盘符 "C:"
   mount_point: string;  // "C:\"
   file_system: string;  // "NTFS"
-  label: string;        // 卷标
+  label: string;        // 卷标；网络盘为 UNC 路径（\\NAS\share）
   total: number;
   used: number;
   available: number;
   removable: boolean;
+  remote: boolean;      // SMB 等网络映射盘
 }
 
 // 单个游戏移动结果（磁盘管理「应用」）

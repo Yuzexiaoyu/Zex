@@ -619,7 +619,7 @@ export default function DiskManagerModal({ onClose }: Props) {
                             {v.label && <span className="text-text-tertiary font-normal"> · {v.label}</span>}
                           </p>
                           <p className="text-xs text-text-tertiary mt-0.5 truncate">
-                            {v.file_system}{v.removable ? ` · ${t('disk.removable')}` : ''} · {fmtBytes(v.total)}
+                            {v.file_system}{v.removable ? ` · ${t('disk.removable')}` : ''}{v.remote ? ` · ${t('disk.network')}` : ''} · {fmtBytes(v.total)}
                           </p>
                         </div>
                       </div>

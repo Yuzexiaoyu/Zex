@@ -754,11 +754,118 @@ pub struct DiskVolume {
     pub drive: String,        // 盘符 "C:"
     pub mount_point: String,  // "C:\\"
     pub file_system: String,  // "NTFS"
-    pub label: String,        // 卷标（系统分区常为空）
+    pub label: String,        // 卷标（系统分区常为空）；网络盘为共享名（无卷标时退回 UNC）
     pub total: u64,
     pub used: u64,
     pub available: u64,
     pub removable: bool,
+    pub remote: bool,         // 网络映射盘（SMB 等映射了盘符的远程共享）
+}
+
+// 枚举网络映射盘（SMB/NFS 共享映射的盘符，GetDriveTypeW == DRIVE_REMOTE）。
+// sysinfo 的 Disks 在 Windows 只收 DRIVE_FIXED / DRIVE_REMOVABLE，网络盘被它直接
+// 跳过（sysinfo/src/windows/disk.rs），磁盘管理要展示 SMB 盘只能在这里单独补
+fn network_volumes() -> Vec<DiskVolume> {
+    use windows_sys::Win32::Foundation::WIN32_ERROR;
+    use windows_sys::Win32::NetworkManagement::WNet::WNetGetConnectionW;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW,
+    };
+    use windows_sys::Win32::System::WindowsProgramming::DRIVE_REMOTE;
+
+    // NUL 分隔的盘符根路径列表："C:\\\0D:\\\0…\0\0"
+    let buf = unsafe {
+        let len = GetLogicalDriveStringsW(0, std::ptr::null_mut());
+        if len == 0 {
+            return vec![];
+        }
+        let mut buf = vec![0u16; len as usize];
+        if GetLogicalDriveStringsW(len, buf.as_mut_ptr()) == 0 {
+            return vec![];
+        }
+        buf
+    };
+
+    let mut out = Vec::new();
+    for root in buf.split(|&c| c == 0) {
+        if root.is_empty() {
+            continue;
+        }
+        let root_ptr = root.as_ptr();
+        unsafe {
+            if GetDriveTypeW(root_ptr) != DRIVE_REMOTE {
+                continue;
+            }
+            // 断开的映射盘查不到容量，列出来没有意义，跳过
+            let mut total = 0u64;
+            let mut avail = 0u64;
+            let ok = GetDiskFreeSpaceExW(
+                root_ptr,
+                std::ptr::null_mut(),
+                &mut total,
+                &mut avail,
+            );
+            if ok == 0 || total == 0 {
+                continue;
+            }
+
+            let mount_point = String::from_utf16_lossy(root);
+            let drive = mount_point
+                .chars()
+                .find(|c| c.is_ascii_alphabetic())
+                .map(|c| format!("{}:", c.to_ascii_uppercase()))
+                .unwrap_or_else(|| mount_point.trim_end_matches('\\').to_string());
+
+            // 卷标：SMB 映射盘的卷标就是共享名（映射 \\NAS\Media 时 Explorer 也显示 Media），
+            // 直接当展示名；个别共享不上报卷标时才退回 UNC 路径，保证至少有个可辨识的名字
+            let mut label_buf = [0u16; 256];
+            let mut fs_buf = [0u16; 32];
+            let _ = GetVolumeInformationW(
+                root_ptr,
+                label_buf.as_mut_ptr(),
+                label_buf.len() as u32,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                fs_buf.as_mut_ptr(),
+                fs_buf.len() as u32,
+            );
+            let vol_label = wide_to_string(&label_buf);
+            let file_system = wide_to_string(&fs_buf);
+
+            let unc = {
+                let drive_wide: Vec<u16> = drive.encode_utf16().chain(std::iter::once(0)).collect();
+                let mut unc_buf = vec![0u16; 1024];
+                let mut unc_len = unc_buf.len() as u32;
+                let rc: WIN32_ERROR = WNetGetConnectionW(drive_wide.as_ptr(), unc_buf.as_mut_ptr(), &mut unc_len);
+                if rc == 0 {
+                    Some(String::from_utf16_lossy(&unc_buf[..unc_len as usize]))
+                        .filter(|s| !s.is_empty())
+                } else {
+                    None
+                }
+            };
+
+            out.push(DiskVolume {
+                drive,
+                mount_point,
+                file_system,
+                label: if vol_label.is_empty() { unc.unwrap_or_default() } else { vol_label },
+                total,
+                used: total.saturating_sub(avail),
+                available: avail,
+                removable: false,
+                remote: true,
+            });
+        }
+    }
+    out
+}
+
+// UTF-16 缓冲区 → 截到首个 NUL 的 String
+fn wide_to_string(buf: &[u16]) -> String {
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..end])
 }
 
 // 列出所有本地磁盘卷：容量 / 已用 / 可用 / 文件系统 / 是否可移动。
@@ -796,9 +903,12 @@ fn get_disk_volumes() -> AppResult<Vec<DiskVolume>> {
                 used: d.total_space().saturating_sub(d.available_space()),
                 available: d.available_space(),
                 removable: d.is_removable(),
+                remote: false,
             }
         })
         .collect();
+    // SMB 等网络映射盘 sysinfo 不收，单独枚举补进来（盘符与本地盘无重叠，随大流排序/去重）
+    out.extend(network_volumes());
     out.sort_by_key(|v| v.drive.clone());
     // 同一物理卷挂到多个路径会重复列出，按盘符去重（保留第一个）
     out.dedup_by(|a, b| a.drive == b.drive);

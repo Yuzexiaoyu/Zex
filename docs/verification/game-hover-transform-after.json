@@ -1,0 +1,147 @@
+[
+  {
+    "label": "idle",
+    "card": {
+      "x": 519.25,
+      "y": 90,
+      "width": 153.75,
+      "height": 230.625,
+      "top": 90,
+      "right": 673,
+      "bottom": 320.625,
+      "left": 519.25
+    },
+    "image": {
+      "x": 520.25,
+      "y": 91,
+      "width": 151.75,
+      "height": 227.625,
+      "top": 91,
+      "right": 672,
+      "bottom": 318.625,
+      "left": 520.25
+    },
+    "cardTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "imageTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "imageWillChange": "transform",
+    "animations": [],
+    "imageLayers": []
+  },
+  {
+    "label": "hover",
+    "card": {
+      "x": 519.25,
+      "y": 90,
+      "width": 153.75,
+      "height": 230.625,
+      "top": 90,
+      "right": 673,
+      "bottom": 320.625,
+      "left": 519.25
+    },
+    "image": {
+      "x": 515.697509765625,
+      "y": 84.17125701904297,
+      "width": 160.85498046875,
+      "height": 241.282470703125,
+      "top": 84.17125701904297,
+      "right": 676.552490234375,
+      "bottom": 325.45372772216797,
+      "left": 515.697509765625
+    },
+    "cardTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "imageTransform": "matrix(1.06, 0, 0, 1.06, 0, 0)",
+    "imageWillChange": "transform",
+    "animations": [],
+    "imageLayers": []
+  },
+  {
+    "label": "leaving-250ms",
+    "card": {
+      "x": 519.25,
+      "y": 90,
+      "width": 153.75,
+      "height": 230.625,
+      "top": 90,
+      "right": 673,
+      "bottom": 320.625,
+      "left": 519.25
+    },
+    "image": {
+      "x": 520.2359008789062,
+      "y": 90.97885131835938,
+      "width": 151.7781982421875,
+      "height": 227.66729736328125,
+      "top": 90.97885131835938,
+      "right": 672.0140991210938,
+      "bottom": 318.6461486816406,
+      "left": 520.2359008789062
+    },
+    "cardTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "imageTransform": "matrix(1.00019, 0, 0, 1.00019, 0, 0)",
+    "imageWillChange": "transform",
+    "animations": [
+      {
+        "state": "running",
+        "time": 262.5769999998897
+      }
+    ],
+    "imageLayers": []
+  },
+  {
+    "label": "leaving-340ms",
+    "card": {
+      "x": 519.25,
+      "y": 90,
+      "width": 153.75,
+      "height": 230.625,
+      "top": 90,
+      "right": 673,
+      "bottom": 320.625,
+      "left": 519.25
+    },
+    "image": {
+      "x": 520.25,
+      "y": 91,
+      "width": 151.75,
+      "height": 227.625,
+      "top": 91,
+      "right": 672,
+      "bottom": 318.625,
+      "left": 520.25
+    },
+    "cardTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "imageTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "imageWillChange": "transform",
+    "animations": [],
+    "imageLayers": []
+  },
+  {
+    "label": "idle-after",
+    "card": {
+      "x": 519.25,
+      "y": 90,
+      "width": 153.75,
+      "height": 230.625,
+      "top": 90,
+      "right": 673,
+      "bottom": 320.625,
+      "left": 519.25
+    },
+    "image": {
+      "x": 520.25,
+      "y": 91,
+      "width": 151.75,
+      "height": 227.625,
+      "top": 91,
+      "right": 672,
+      "bottom": 318.625,
+      "left": 520.25
+    },
+    "cardTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "imageTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "imageWillChange": "transform",
+    "animations": [],
+    "imageLayers": []
+  }
+]

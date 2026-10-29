@@ -1,0 +1,741 @@
+{
+  "timestamp": "2026-10-29T05:54:56.008Z",
+  "environment": "Chrome; real MusicView and CSS; mocked Tauri IPC",
+  "results": [
+    {
+      "test": "4 columns multi at 2560px",
+      "status": "pass",
+      "entrance": {
+        "columns": 4,
+        "count": 64,
+        "wrapper": {
+          "x": 24,
+          "y": 74,
+          "width": 2512,
+          "height": 52,
+          "top": 74,
+          "right": 2536,
+          "bottom": 126,
+          "left": 24
+        },
+        "rows": [
+          {
+            "duration": 104,
+            "delay": 0,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 22,
+            "x": "-1px",
+            "y": "8px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 136,
+            "delay": 44,
+            "x": "1px",
+            "y": "7px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 112,
+            "delay": 66,
+            "x": "3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 10,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 34,
+            "x": "-1px",
+            "y": "8px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 136,
+            "delay": 53,
+            "x": "1px",
+            "y": "7px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 112,
+            "delay": 77,
+            "x": "3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          }
+        ]
+      },
+      "settled": {
+        "enterCount": 0,
+        "allVisible": true,
+        "wrapper": {
+          "x": 24,
+          "y": 74,
+          "width": 2512,
+          "height": 52,
+          "top": 74,
+          "right": 2536,
+          "bottom": 126,
+          "left": 24
+        }
+      },
+      "animationEvents": {
+        "ended": [
+          0.104,
+          0.104,
+          0.104,
+          0.104,
+          0.12,
+          0.10399999999999998,
+          0.12,
+          0.104,
+          0.11999999999999998,
+          0.10399999999999998,
+          0.10399999999999998,
+          0.136,
+          0.11199999999999999,
+          0.12,
+          0.104,
+          0.136,
+          0.112,
+          0.12,
+          0.136,
+          0.104,
+          0.112,
+          0.12,
+          0.104,
+          0.136,
+          0.112,
+          0.136,
+          0.12,
+          0.104,
+          0.112,
+          0.10399999999999998,
+          0.136,
+          0.11999999999999998,
+          0.11199999999999999,
+          0.136,
+          0.10399999999999998,
+          0.136,
+          0.12,
+          0.11199999999999999,
+          0.12,
+          0.10399999999999998,
+          0.112,
+          0.136,
+          0.104,
+          0.136,
+          0.12,
+          0.112,
+          0.136,
+          0.12,
+          0.112,
+          0.136,
+          0.12,
+          0.11199999999999999,
+          0.136,
+          0.11199999999999999,
+          0.12,
+          0.136,
+          0.136,
+          0.11199999999999999,
+          0.12,
+          0.136,
+          0.112,
+          0.12,
+          0.112,
+          0.112
+        ],
+        "cancelled": []
+      }
+    },
+    {
+      "test": "3 columns multi at 1920px",
+      "status": "pass",
+      "entrance": {
+        "columns": 3,
+        "count": 48,
+        "wrapper": {
+          "x": 24,
+          "y": 74,
+          "width": 1872,
+          "height": 52,
+          "top": 74,
+          "right": 1896,
+          "bottom": 126,
+          "left": 24
+        },
+        "rows": [
+          {
+            "duration": 104,
+            "delay": 0,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 22,
+            "x": "-1px",
+            "y": "8px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 136,
+            "delay": 44,
+            "x": "1px",
+            "y": "7px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 10,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 34,
+            "x": "-1px",
+            "y": "8px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 136,
+            "delay": 53,
+            "x": "1px",
+            "y": "7px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 20,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 46,
+            "x": "-1px",
+            "y": "8px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          }
+        ]
+      },
+      "settled": {
+        "enterCount": 0,
+        "allVisible": true,
+        "wrapper": {
+          "x": 24,
+          "y": 74,
+          "width": 1872,
+          "height": 52,
+          "top": 74,
+          "right": 1896,
+          "bottom": 126,
+          "left": 24
+        }
+      },
+      "animationEvents": {
+        "ended": [
+          0.104,
+          0.104,
+          0.104,
+          0.104,
+          0.12,
+          0.10399999999999998,
+          0.12,
+          0.104,
+          0.11999999999999998,
+          0.10399999999999998,
+          0.10399999999999998,
+          0.136,
+          0.12,
+          0.104,
+          0.136,
+          0.12,
+          0.136,
+          0.104,
+          0.12,
+          0.104,
+          0.136,
+          0.136,
+          0.12,
+          0.104,
+          0.136,
+          0.10399999999999998,
+          0.11999999999999998,
+          0.136,
+          0.10399999999999998,
+          0.136,
+          0.12,
+          0.12,
+          0.10399999999999998,
+          0.136,
+          0.104,
+          0.136,
+          0.12,
+          0.136,
+          0.12,
+          0.136,
+          0.12,
+          0.136,
+          0.12,
+          0.136,
+          0.136,
+          0.12,
+          0.136,
+          0.12
+        ],
+        "cancelled": []
+      }
+    },
+    {
+      "test": "2 columns multi at 1280px",
+      "status": "pass",
+      "entrance": {
+        "columns": 2,
+        "count": 32,
+        "wrapper": {
+          "x": 24,
+          "y": 74,
+          "width": 1232,
+          "height": 52,
+          "top": 74,
+          "right": 1256,
+          "bottom": 126,
+          "left": 24
+        },
+        "rows": [
+          {
+            "duration": 104,
+            "delay": 0,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 22,
+            "x": "-1px",
+            "y": "8px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 10,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 34,
+            "x": "-1px",
+            "y": "8px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 20,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 46,
+            "x": "-1px",
+            "y": "8px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 30,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 58,
+            "x": "-1px",
+            "y": "8px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          }
+        ]
+      },
+      "settled": {
+        "enterCount": 0,
+        "allVisible": true,
+        "wrapper": {
+          "x": 24,
+          "y": 74,
+          "width": 1232,
+          "height": 52,
+          "top": 74,
+          "right": 1256,
+          "bottom": 126,
+          "left": 24
+        }
+      },
+      "animationEvents": {
+        "ended": [
+          0.104,
+          0.104,
+          0.104,
+          0.104,
+          0.12,
+          0.10399999999999998,
+          0.12,
+          0.104,
+          0.11999999999999998,
+          0.10399999999999998,
+          0.10399999999999998,
+          0.12,
+          0.104,
+          0.12,
+          0.104,
+          0.12,
+          0.104,
+          0.12,
+          0.104,
+          0.10399999999999998,
+          0.11999999999999998,
+          0.10399999999999998,
+          0.12,
+          0.10399999999999998,
+          0.12,
+          0.104,
+          0.12,
+          0.12,
+          0.12,
+          0.12,
+          0.12,
+          0.12
+        ],
+        "cancelled": []
+      }
+    },
+    {
+      "test": "1 columns multi at 960px",
+      "status": "pass",
+      "entrance": {
+        "columns": 1,
+        "count": 16,
+        "wrapper": {
+          "x": 24,
+          "y": 74,
+          "width": 912,
+          "height": 52,
+          "top": 74,
+          "right": 936,
+          "bottom": 126,
+          "left": 24
+        },
+        "rows": [
+          {
+            "duration": 104,
+            "delay": 0,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 10,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 20,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 30,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 40,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 50,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 60,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 104,
+            "delay": 70,
+            "x": "-3px",
+            "y": "6px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          }
+        ]
+      },
+      "settled": {
+        "enterCount": 0,
+        "allVisible": true,
+        "wrapper": {
+          "x": 24,
+          "y": 74,
+          "width": 912,
+          "height": 52,
+          "top": 74,
+          "right": 936,
+          "bottom": 126,
+          "left": 24
+        }
+      },
+      "animationEvents": {
+        "ended": [
+          0.104,
+          0.104,
+          0.104,
+          0.104,
+          0.10399999999999998,
+          0.104,
+          0.10399999999999998,
+          0.10399999999999998,
+          0.104,
+          0.104,
+          0.104,
+          0.104,
+          0.10399999999999998,
+          0.10399999999999998,
+          0.10399999999999998,
+          0.104
+        ],
+        "cancelled": []
+      }
+    },
+    {
+      "test": "1 columns single at 1280px",
+      "status": "pass",
+      "entrance": {
+        "columns": 1,
+        "count": 13,
+        "wrapper": {
+          "x": 24,
+          "y": 74,
+          "width": 1232,
+          "height": 64,
+          "top": 74,
+          "right": 1256,
+          "bottom": 138,
+          "left": 24
+        },
+        "rows": [
+          {
+            "duration": 120,
+            "delay": 0,
+            "x": "0px",
+            "y": "5px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 10,
+            "x": "0px",
+            "y": "5px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 20,
+            "x": "0px",
+            "y": "5px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 30,
+            "x": "0px",
+            "y": "5px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 40,
+            "x": "0px",
+            "y": "5px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 50,
+            "x": "0px",
+            "y": "5px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 60,
+            "x": "0px",
+            "y": "5px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          },
+          {
+            "duration": 120,
+            "delay": 70,
+            "x": "0px",
+            "y": "5px",
+            "name": "music-row-reveal",
+            "opacity": "0"
+          }
+        ]
+      },
+      "settled": {
+        "enterCount": 0,
+        "allVisible": true,
+        "wrapper": {
+          "x": 24,
+          "y": 74,
+          "width": 1232,
+          "height": 64,
+          "top": 74,
+          "right": 1256,
+          "bottom": 138,
+          "left": 24
+        }
+      },
+      "animationEvents": {
+        "ended": [
+          0.12,
+          0.12,
+          0.11999999999999998,
+          0.12,
+          0.12,
+          0.11999999999999998,
+          0.12,
+          0.12,
+          0.12,
+          0.12,
+          0.12,
+          0.11999999999999998,
+          0.12
+        ],
+        "cancelled": []
+      }
+    },
+    {
+      "test": "scroll interrupts reveal; returning rows do not replay",
+      "status": "pass"
+    },
+    {
+      "test": "delayed track load still animates and completes",
+      "status": "pass",
+      "asyncStyles": [
+        {
+          "duration": 104,
+          "delay": 0,
+          "x": "-3px",
+          "y": "6px",
+          "name": "music-row-reveal",
+          "opacity": "0"
+        },
+        {
+          "duration": 120,
+          "delay": 22,
+          "x": "-1px",
+          "y": "8px",
+          "name": "music-row-reveal",
+          "opacity": "0"
+        },
+        {
+          "duration": 136,
+          "delay": 44,
+          "x": "1px",
+          "y": "7px",
+          "name": "music-row-reveal",
+          "opacity": "0"
+        },
+        {
+          "duration": 112,
+          "delay": 66,
+          "x": "3px",
+          "y": "6px",
+          "name": "music-row-reveal",
+          "opacity": "0"
+        }
+      ]
+    },
+    {
+      "test": "reduced motion displays all rows immediately",
+      "status": "pass"
+    }
+  ],
+  "errors": []
+}

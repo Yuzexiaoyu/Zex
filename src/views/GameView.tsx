@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../store';
+import * as api from '../api';
 import GameGrid from '../components/GameGrid';
 import GameDetail from './GameDetail';
 import SteamScanModal from '../components/SteamScanModal';
 import DiskManagerModal from '../components/DiskManagerModal';
-import { message } from '@tauri-apps/plugin-dialog';
-import { Plus, Gamepad2, ChevronDown, Gauge } from 'lucide-react';
+import { message, open } from '@tauri-apps/plugin-dialog';
+import { Plus, Gamepad2, ChevronDown, Gauge, FileArchive } from 'lucide-react';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useT } from '../i18n';
 import FpsSettingsModal from '../components/FpsSettingsModal';
@@ -19,12 +20,26 @@ export default function GameView({ onAddGame }: Props) {
   // 逐字段订阅，避免无关字段（如音乐进度）带着整个游戏库重画
   const games = useAppStore((s) => s.games);
   const loadGames = useAppStore((s) => s.loadGames);
+  const gameFolders = useAppStore((s) => s.gameFolders);
+  const loadGameFolders = useAppStore((s) => s.loadGameFolders);
+  const filter = useAppStore((s) => s.filter);
   // 详情弹出窗口（仅右键菜单「查看详情」进入）
   const selectedGameId = useAppStore((s) => s.selectedGameId);
   const setSelectedGameId = useAppStore((s) => s.setSelectedGameId);
   const launchGame = useAppStore((s) => s.launchGame);
 
   const columns = useAppStore((s) => s.gameColumns); // 每行数量在「设置 → 外观」里调
+
+  // 主页按名称去重：同名若有可玩（未归档）版，只显示可玩版、隐藏已归档的那张；同名全是已归档
+  // （压缩的 / 导入但未安装的）则全部保留。磁盘管理不走这里，仍显示全部副本（含同名的归档包）。
+  const visibleGames = useMemo(() => {
+    const playable = new Set<string>();
+    for (const g of games) {
+      if (!g.archive_status) playable.add(g.name.trim().toLowerCase());
+    }
+    return games.filter((g) => !g.archive_status || !playable.has(g.name.trim().toLowerCase()));
+  }, [games]);
+
   const [showSteamModal, setShowSteamModal] = useState(false);
   const [addMenu, setAddMenu] = useState(false); // 添加游戏下拉（手动 / Steam 导入）
   const [showDiskManager, setShowDiskManager] = useState(false); // 磁盘管理弹窗（右键菜单进入）
@@ -36,6 +51,7 @@ export default function GameView({ onAddGame }: Props) {
 
   useEffect(() => {
     loadGames();
+    loadGameFolders();
   }, []);
 
   // 下拉打开时：点击别处 / Esc 关闭
@@ -61,11 +77,24 @@ export default function GameView({ onAddGame }: Props) {
     }
   }, [launchGame]);
 
+  // 添加游戏压缩包：选一个 .7z，后端读清单建一条「已归档」游戏（之后可右键解压恢复）
+  const handleImportArchive = useCallback(async () => {
+    try {
+      const sel = await open({ title: t('games.importArchivePickTitle'), multiple: false, filters: [{ name: '7z', extensions: ['7z'] }] });
+      if (typeof sel !== 'string') return;
+      await api.importArchive(sel);
+      await loadGames();
+    } catch (err: any) {
+      await message(t('games.importArchiveFailed', { msg: typeof err === 'string' ? err : (err?.message ?? String(err)) }), { title: t('common.error'), kind: 'error' });
+    }
+  }, [loadGames, t]);
+
   return (
     <div className="flex h-full">
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Toolbar（排序与列数已移入右键菜单） */}
+        {/* Toolbar（排序与列数已移入右键菜单）。空库时与影视库一致：整页只显示空态，工具栏不出现 */}
+        {games.length > 0 && (
         <div className="shrink-0 px-6 py-4 flex items-center gap-3">
           {/* 添加游戏下拉：手动添加 / Steam 导入 */}
           <div className="relative">
@@ -109,6 +138,18 @@ export default function GameView({ onAddGame }: Props) {
                         <span className="block mt-0.5 text-xs text-text-secondary">{t('games.steamImportDesc')}</span>
                       </span>
                     </button>
+                    <button
+                      onClick={() => { setAddMenu(false); handleImportArchive(); }}
+                      className="group w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-all hover:bg-bg-surface-hover border border-transparent hover:border-border-glass-hover"
+                    >
+                      <span className="w-10 h-10 rounded-xl bg-bg-surface border border-border-glass flex items-center justify-center shrink-0 group-hover:bg-bg-surface-active">
+                        <FileArchive size={18} className="text-text-secondary group-hover:text-text-primary" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-text-primary">{t('games.importArchive')}</span>
+                        <span className="block mt-0.5 text-xs text-text-secondary">{t('games.importArchiveDesc')}</span>
+                      </span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -124,15 +165,19 @@ export default function GameView({ onAddGame }: Props) {
             {t('games.fpsSettings')}
           </button>
         </div>
+        )}
 
         {/* Grid */}
         <div className="flex-1 min-h-0">
           <GameGrid
-            games={games}
+            games={visibleGames}
+            folders={gameFolders}
+            flat={!!filter.search || !!filter.favorite}
             onLaunch={handleLaunch}
             columns={columns}
             onAddGame={onAddGame}
             onOpenSteam={() => setShowSteamModal(true)}
+            onImportArchive={handleImportArchive}
             onOpenDiskManager={() => setShowDiskManager(true)}
             onOpenFpsSettings={(gameId) => setShowFpsModal(gameId)}
           />

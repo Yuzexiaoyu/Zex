@@ -15,7 +15,9 @@ export const zh: Record<string, string> = {
   // 封面选择弹窗
   'misc.coverLoading': '正在获取封面...',
   'misc.coverNonePortrait': '没有找到可用的竖版封面',
+  'misc.coverNoneWide': '没有找到可用的横屏封面',
   'misc.coverNoneSgdb': '该游戏在 SteamGridDB 上没有 600×900 封面',
+  'misc.coverNoneSgdbWide': '该游戏在 SteamGridDB 上没有 1920×620 横屏封面',
   'misc.coverFetchFailed': '获取封面失败',
   'misc.coverSetFailed': '设置封面失败',
   'misc.unknownAuthor': '未知作者',
@@ -25,6 +27,8 @@ export const zh: Record<string, string> = {
   'misc.tmdbPickDesc': '「{title}」在 TMDB 上有 {n} 个同名/相近结果，选中的那条会用于获取简介、评分和剧照',
   'misc.tmdbCurrent': '当前匹配',
   'misc.tmdbNoOverview': '（该条目暂无简介）',
+  'misc.mediaTypeMovie': '电影',
+  'misc.mediaTypeTv': '剧集',
 };
 
 export const en: Record<string, string> = {
@@ -43,7 +47,9 @@ export const en: Record<string, string> = {
   // Cover picker modal
   'misc.coverLoading': 'Fetching covers...',
   'misc.coverNonePortrait': 'No usable portrait covers found',
+  'misc.coverNoneWide': 'No usable landscape covers found',
   'misc.coverNoneSgdb': 'This game has no 600×900 covers on SteamGridDB',
+  'misc.coverNoneSgdbWide': 'This game has no 1920×620 landscape covers on SteamGridDB',
   'misc.coverFetchFailed': 'Failed to fetch covers',
   'misc.coverSetFailed': 'Failed to set cover',
   'misc.unknownAuthor': 'Unknown author',
@@ -53,4 +59,6 @@ export const en: Record<string, string> = {
   'misc.tmdbPickDesc': '"{title}" has {n} same-named or similar results on TMDB; the one you pick is used for the synopsis, rating and stills',
   'misc.tmdbCurrent': 'Current match',
   'misc.tmdbNoOverview': '(No synopsis for this entry)',
+  'misc.mediaTypeMovie': 'Movie',
+  'misc.mediaTypeTv': 'TV',
 };

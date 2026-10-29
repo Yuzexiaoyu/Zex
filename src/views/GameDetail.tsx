@@ -23,6 +23,15 @@ function formatDate(iso: string, locale: string): string {
   return new Date(iso).toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+// 字节数友好显示（与磁盘管理同款：100 以上取整，否则一位小数）
+function fmtBytes(n: number): string {
+  if (!n || n <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  const v = n / 1024 ** i;
+  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+}
+
 // 详情弹出窗口：仅通过右键菜单「查看详情」进入（点击卡片不再打开）
 // 设计概念：你在网格里右键的那张竖版封面，在这里"打开成实体卡盒"——
 // 竖版封面卡与网格同源，是窗口唯一的图；其余全部退到玻璃上。
@@ -34,6 +43,7 @@ export default function GameDetail({ gameId, onClose }: Props) {
   const updateGame = useAppStore((s) => s.updateGame);
   const deleteGame = useAppStore((s) => s.deleteGame);
   const launchGame = useAppStore((s) => s.launchGame);
+  const loadGames = useAppStore((s) => s.loadGames);
   const game = games.find((g) => g.id === gameId);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Partial<Game>>({});
@@ -115,20 +125,30 @@ export default function GameDetail({ gameId, onClose }: Props) {
   };
 
   const handleSave = async () => {
-    // 与添加游戏同款校验：安装目录必须包含启动程序（防止把无关目录赋给游戏）
-    const dir = (form.install_dir || '').trim();
-    const exe = (form.exe_path || '').trim();
-    if (dir && exe) {
-      const dirNorm = dir.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-      const exeNorm = exe.replace(/\\/g, '/').toLowerCase();
-      if (!exeNorm.startsWith(dirNorm + '/')) {
-        await message(t('games.dirMismatch'), { title: t('games.cannotSave'), kind: 'warning' });
+    if (game.archive_status) {
+      // 归档态只改名称：安装目录/启动程序后端禁改，不做路径校验，仅拦空名
+      if (!(form.name || '').trim()) {
+        await message(t('games.nameRequired'), { title: t('games.cannotSave'), kind: 'warning' });
         return;
+      }
+    } else {
+      // 与添加游戏同款校验：安装目录必须包含启动程序（防止把无关目录赋给游戏）
+      const dir = (form.install_dir || '').trim();
+      const exe = (form.exe_path || '').trim();
+      if (dir && exe) {
+        const dirNorm = dir.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+        const exeNorm = exe.replace(/\\/g, '/').toLowerCase();
+        if (!exeNorm.startsWith(dirNorm + '/')) {
+          await message(t('games.dirMismatch'), { title: t('games.cannotSave'), kind: 'warning' });
+          return;
+        }
       }
     }
     setLoading(true);
     try {
       await updateGame(gameId, form);
+      // 归档游戏改名可能触发历史统计并入（后端 absorb），刷新以更新详情头部累计时长
+      if (game.archive_status) await loadGames();
       setEditing(false);
     } catch (err: any) {
       // 失败必须提示：无 catch 的话按钮复位但用户以为保存成功了，下次打开才发现没生效
@@ -151,6 +171,7 @@ export default function GameDetail({ gameId, onClose }: Props) {
   };
 
   const handleLaunch = async () => {
+    if (game.archive_status) return;
     try {
       await launchGame(gameId);
     } catch (err: any) {
@@ -160,6 +181,12 @@ export default function GameDetail({ gameId, onClose }: Props) {
 
   const tags: string[] = JSON.parse(game.tags || '[]');
   const coverSrc = game.cover_path || game.banner_path;
+  // 归档信息展示用：原始/压缩大小与节省比例（原始未知时不显示比例）
+  const archOrig = game.archive_original_size || 0;
+  const archComp = game.archive_size || 0;
+  const archSaved = archOrig > 0 && archComp > 0 && archComp <= archOrig
+    ? t('games.archiveSaved', { pct: Math.round((1 - archComp / archOrig) * 100) })
+    : '';
 
   return createPortal(
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
@@ -198,6 +225,13 @@ export default function GameDetail({ gameId, onClose }: Props) {
             {/* 标题列：字重最高 → 状态文字次之 */}
             <div className="flex-1 min-w-0 pt-1.5">
               <h2 className="text-xl font-bold leading-snug text-text-primary line-clamp-2 mb-1.5">{game.name}</h2>
+              {game.archive_status && (
+                <div className="mt-3 text-xs text-amber-400 space-y-1 break-all">
+                  <p>{t(game.archive_status === 'cleanup_pending' ? 'games.archiveLeftover' : 'games.archived')} · {t('games.archiveCannotLaunch')}</p>
+                  <p>{game.archive_path}</p>
+                  {game.archive_status === 'cleanup_pending' && <p>{t('games.archiveLeftoverWarning')}</p>}
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary tabular-nums">
                 <span>{game.total_seconds > 0 ? t('games.playedTime', { time: formatDuration(game.total_seconds) }) : t('games.notPlayed')}</span>
                 <span className="text-text-tertiary">·</span>
@@ -210,7 +244,9 @@ export default function GameDetail({ gameId, onClose }: Props) {
           <div className="shrink-0 mt-6">
             <button
               onClick={handleLaunch}
-              className={clsx('w-full btn btn-accent py-3 text-sm font-semibold mb-3', detailFocused === 0 && 'gamepad-focus')}
+              disabled={!!game.archive_status}
+              title={game.archive_status ? t('games.archiveCannotLaunch') : undefined}
+              className={clsx('w-full btn btn-accent py-3 text-sm font-semibold mb-3 disabled:opacity-50', detailFocused === 0 && 'gamepad-focus')}
             >
               <Play size={16} fill="currentColor" />
               {t('games.launch')}
@@ -225,7 +261,40 @@ export default function GameDetail({ gameId, onClose }: Props) {
             </button>
 
             {/* Edit form */}
-            {editing && (
+            {editing && (game.archive_status ? (
+              /* 归档态：安装目录/启动程序后端禁改，这里只给改名 + 只读归档信息 */
+              <div className="glass-card p-4 mb-2 space-y-3 animate-fade-up">
+                <label className="block text-xs text-text-secondary">
+                  {t('games.name')}
+                  <input
+                    type="text"
+                    value={form.name || ''}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    className="input mt-1 text-sm"
+                    placeholder={t('games.namePlaceholder')}
+                  />
+                </label>
+                <div className="space-y-1.5">
+                  <span className="block text-xs font-semibold text-text-tertiary uppercase tracking-wider">{t('games.archiveInfo')}</span>
+                  <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs leading-relaxed">
+                    <span className="text-text-tertiary">{t('games.archiveFileLabel')}</span>
+                    <span className="text-text-secondary/80 break-all select-text">{game.archive_path || '-'}</span>
+                    <span className="text-text-tertiary">{t('games.archiveOriginalLabel')}</span>
+                    <span className="text-text-secondary/80">{fmtBytes(archOrig)}</span>
+                    <span className="text-text-tertiary">{t('games.archiveCompressedLabel')}</span>
+                    <span className="text-text-secondary/80">{fmtBytes(archComp)}{archSaved && ` · ${archSaved}`}</span>
+                  </div>
+                </div>
+                <p className="text-[11px] leading-relaxed text-amber-400/90">{t('games.archiveEditHint')}</p>
+                <button
+                  onClick={handleSave}
+                  disabled={loading}
+                  className="w-full btn btn-accent py-2.5 text-sm"
+                >
+                  {loading ? t('common.saving') : t('games.saveName')}
+                </button>
+              </div>
+            ) : (
               <div className="glass-card p-4 mb-2 space-y-3 animate-fade-up">
                 <label className="block text-xs text-text-secondary">
                   {t('games.installDir')}
@@ -279,6 +348,19 @@ export default function GameDetail({ gameId, onClose }: Props) {
                     placeholder={t('games.launchArgsDetailPlaceholder')}
                   />
                 </label>
+                <label className="block text-xs text-text-secondary">
+                  {t('games.monitorProcess')}
+                  <input
+                    type="text"
+                    value={form.monitor_process || ''}
+                    onChange={(e) => setForm({ ...form, monitor_process: e.target.value })}
+                    className="input mt-1 text-sm"
+                    placeholder={t('games.monitorProcessPlaceholder')}
+                  />
+                  <span className="block mt-1 text-[11px] leading-relaxed text-text-tertiary">
+                    {t('games.monitorProcessHint')}
+                  </span>
+                </label>
                 <button
                   onClick={handleSave}
                   disabled={loading}
@@ -287,7 +369,7 @@ export default function GameDetail({ gameId, onClose }: Props) {
                   {loading ? t('common.saving') : t('common.save')}
                 </button>
               </div>
-            )}
+            ))}
           </div>
 
           {/* 滚动信息区：详情最弱最浅，删除纯文字标红在最底部 */}

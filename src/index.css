@@ -153,6 +153,16 @@ html.app-blank body > * { visibility: hidden; }
 
 ::-webkit-scrollbar-thumb:hover { background: var(--color-accent); }
 
+/* 库页面的主滚动容器（游戏库 / 文件夹内 / 影视库 / 音乐库）：常驻滚动条槽位。
+   不常驻的话，内容高度一越过阈值（拖拽时末尾多出来的那一行空格、筛选/搜索改变条目数）
+   滚动条就凭空出现，吃掉 4px 内容宽度 → 网格列宽变小 → 2:3 的卡片跟着变窄变矮 →
+   虚拟滚动重新测量所有行高 → 滚到底时 scrollTop 被夹回来：整片卡片往左上跳一下。
+   槽位常驻后宽度恒定，上面整条链路不会触发（与 .disk-manager-list 同款处理） */
+.library-scroll {
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+
 /* 磁盘管理底部待移动区：横向滚动条加粗可见（全局 4px 太细，深色下几乎看不见） */
 .disk-scroll-x {
   overflow-x: auto;
@@ -188,6 +198,28 @@ html.app-blank body > * { visibility: hidden; }
 .disk-scroll-y::-webkit-scrollbar-thumb:hover {
   background: var(--color-accent);
 }
+
+/* 磁盘管理：顶部锚定，内容优先向下撑高；到达视口边距后才分配列表滚动空间。 */
+.disk-manager-overlay {
+  padding-top: max(24px, 5vh);
+  padding-bottom: 24px;
+}
+.disk-manager-modal {
+  max-height: calc(100dvh - max(24px, 5vh) - 24px);
+  transform-origin: top center;
+}
+.disk-manager-card {
+  min-height: 0;
+  min-width: 0;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+.disk-manager-card > :not([data-disk-list]) { flex-shrink: 0; }
+.disk-manager-list {
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
+}
+.disk-manager-list > [data-disk-content] { padding-right: 4px; }
 
 /* ─── Focus ────────────────────────────────── */
 /* 不要在这里设 border-radius：这条规则无层级，会盖掉元素自身来自 Tailwind 工具类的
@@ -237,7 +269,6 @@ html.app-blank body > * { visibility: hidden; }
 .animate-fade-up { animation: fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
 .animate-fade-in { animation: fade-in 0.25s ease-out forwards; }
 .animate-scale-in { animation: scale-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
-.animate-float { animation: float 3s ease-in-out infinite; }
 
 /* 从托盘恢复时跳过入场动画：窗口 hide 期间 WebView2 不合成新帧，
    hero-in / fade-up 等动画在 mid-state 时 show() 会导致遮罩错位闪烁 */
@@ -409,6 +440,8 @@ html.app-blank body > * { visibility: hidden; }
   cursor: pointer;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-glass);
+  /* 悬停结束仍保留单位变换，避免最后一帧从矩阵切回 none。 */
+  transform: translateY(0) scale(1);
   transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
   animation: card-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
 }
@@ -441,29 +474,43 @@ html.app-blank body > * { visibility: hidden; }
   width: 100%;
   object-fit: cover;
   display: block;
+  /* 缩放全程保留同一合成路径，收尾不切换小数像素的图片绘制位置。 */
+  transform: translateZ(0) scale(1);
+  will-change: transform;
   transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .game-card:hover .game-card-cover {
-  transform: scale(1.06);
+  transform: translateZ(0) scale(1.06);
 }
 
 /* ─── 拖拽排序 ──────────────────────────── */
 /* 拖拽进行中：禁动画（card-enter 重播）也禁过渡——让位卡片瞬间到位，预览位置即最终位置，松手无反馈；
    同时 pointer-events: none —— 拖拽中卡片随实时重排移动/重挂载，mouseleave 可能不触发，
-   残留 preview 状态会让松手时多个悬停弹窗同时出现 */
-.drag-active .game-card { animation: none; transition: none !important; pointer-events: none; }
+   残留 preview 状态会让松手时多个悬停弹窗同时出现。
+   每条规则都带上 .folder-card（文件夹卡与封面卡同格同尺寸，一起参与拖拽）——
+   漏掉任何一条，拖拽时文件夹卡就会重播入场动画或松手抽动 */
+.drag-active .game-card,
+.drag-active .folder-card { animation: none; transition: none !important; pointer-events: none; }
 /* 拖拽结束后（everDragged）永久抑制 card-enter 重播（重排跨行重挂载会闪白），但保留过渡。
    同时把 hover 的 transform 压回动画保留帧的值（translateY(0) scale(1)）：
    拖拽前卡片悬停被 card-enter 保留帧压制、不上浮不放大；拖拽后动画被禁用，这里显式压回
    → 移动前后的悬停效果完全一致（边框/阴影/封面缩放不受影响） */
-.drag-suppress .game-card { animation: none; }
-.drag-suppress .game-card:hover { transform: translateY(0) scale(1); }
+.drag-suppress .game-card,
+.drag-suppress .folder-card { animation: none; }
+.drag-suppress .game-card:hover,
+.drag-suppress .folder-card:hover { transform: translateY(0) scale(1); }
 /* 松手落位帧再禁一次过渡兜底：让位卡片新 grid 槽位恰等于当前视觉位置，直接原位落地 */
-.drop-instant .game-card { transition: none !important; }
-.game-card.dragging { opacity: 0; }  /* 拖拽中原卡片完全隐藏（虚影去掉），只留克隆跟随指针 */
-.drag-clone { position: fixed; pointer-events: none; z-index: 1000; }
-.drag-clone .game-card {
+.drop-instant .game-card,
+.drop-instant .folder-card { transition: none !important; }
+.game-card.dragging,
+.folder-card.dragging { opacity: 0; }  /* 拖拽中原卡片完全隐藏（虚影去掉），只留克隆跟随指针 */
+/* transform 过渡让「拖进文件夹时缩成封面大小」平滑收缩（GameGrid 克隆按比例缩，缩放原点在抓取点，
+   过渡期间指针始终咬住同一处）。浮层克隆拖出放大走的是改 width + 同比挪锚点、即时生效，不吃这条过渡 ——
+   加 width 过渡反而会让指针在放大的 0.16s 里飘。left/top 不过渡，始终实时咬住指针 */
+.drag-clone { position: fixed; pointer-events: none; z-index: 1000; transition: transform 0.16s ease; }
+.drag-clone .game-card,
+.drag-clone .folder-card {
   animation: none;
   transform: scale(1.04);
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6);
@@ -485,13 +532,14 @@ html.app-blank body > * { visibility: hidden; }
   opacity: 1;
 }
 
-/* 手柄焦点卡 = 等效 hover：显示启动按钮 + 高亮。
+/* 手柄焦点卡 = 等效 hover：封面卡显示启动按钮，文件夹卡只高亮（它不带按钮）。
    高亮用 inset box-shadow（卡片内侧描边）而非 outline —— 滚动容器 overflow-y-auto
    无垂直 padding，第一行焦点卡的 outline 会超出可视区顶部被裁剪（上方线条消失）。
    同理不加 transform：手柄导航靠 scrollToIndex 把焦点行顶到容器最上沿，
    上浮 4px + 放大 2% 的溢出部分会被裁掉，封面顶部缺一条。
    鼠标 hover 的上浮也已被 .drag-suppress 压回 0，两种输入这样才一致 */
-.game-card.gamepad-focus {
+.game-card.gamepad-focus,
+.folder-card.gamepad-focus {
   outline: none; /* 覆盖通用 .gamepad-focus 的外侧 outline（会被滚动容器裁剪），只留内侧 inset 线 */
   box-shadow:
     inset 0 0 0 5px var(--color-accent),
@@ -549,6 +597,393 @@ html.app-blank body > * { visibility: hidden; }
 .game-card:hover .game-card-launch {
   opacity: 1;
   transform: translateY(0);
+}
+
+/* 空格：文件夹钉得靠后、游戏填不满时留下的格子。必须撑住 2:3 ——
+   整行都是空格时行高一塌，虚拟滚动实测到的行高就不是卡高，拖拽的格号几何会全错 */
+.library-slot-empty {
+  aspect-ratio: 2/3;
+  border-radius: 16px;
+  border: 1px dashed transparent;
+  /* 不加过渡：拖拽亮格时，已挂载的空格会按 0.2s 渐变淡入，而新挂载的尾行 / 预留行
+     空格首帧即终态（无过渡）——两者错开就成了「从下往上一格格浮现」。去掉过渡让
+     placing 一上，整片虚线网格同一帧全部出现（松手同理整片一起消失） */
+}
+
+/* 顶层拖拽时把空格显出来，「可以放这」要看得见 */
+.placing .library-slot-empty {
+  border-color: rgba(0, 212, 255, 0.22);
+  background: rgba(0, 212, 255, 0.03);
+}
+
+/* 拖拽落点框：主页拖动画在被拖卡片的位置，从文件夹浮层往外拖画在插入点 —— 两处同一个框。
+   空格、以及已被卡片占住的格子都要能亮，所以不挂在格子元素上，
+   而是按格号几何绝对定位铺一层，盖在卡面之上 */
+.drop-slot {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 16px;
+  border: 2px solid rgba(0, 212, 255, 0.75);
+  background: rgba(0, 212, 255, 0.1);
+  box-shadow: 0 0 0 4px rgba(0, 212, 255, 0.1), 0 0 24px rgba(0, 212, 255, 0.25);
+}
+
+/* ─── 文件夹卡（多个游戏收成顶层一格） ────── */
+/* 与封面卡同格同尺寸（2:3）占一格。
+   主视觉是一面**拼图墙**：文件夹里的前几张封面铺满整张卡 ——
+   1 张铺满 / 2 张并排居中 / 3 张左大右两小 / 4 张两行两列；再多就把右下格换成 "+N"。
+   一眼看清里面有哪些游戏，是这张卡要交代的第一件事。
+   底色取首作封面的「招牌色」--fc（见 utils/dominantColor.ts），封面本身再大幅模糊一层
+   垫在拼图后面，从格缝里透出来当氛围色 —— 每个文件夹于是有自己的配色。
+   展开（.open）后留一圈招牌色描边 + 右上角朝上的箭头，成员铺在这张卡之后几格。
+   悬停不出按钮（拼图墙层级在上，按钮只会被封面压住）：反馈只走上浮 + 描边 + 格缝散开。
+   拖拽/悬停/手柄焦点的规则与 .game-card 合并写在上面那几段里，改那边时别漏了这边 */
+.folder-card {
+  position: relative;
+  aspect-ratio: 2/3;
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  /* 招牌色直接铺进底色：卡片整体就是"它的颜色"，不是一块黑板贴了个色条 */
+  background:
+    linear-gradient(165deg, hsl(var(--fc) / 0.32) 0%, hsl(var(--fc) / 0.06) 42%, #0a0c14 76%),
+    #0a0c14;
+  border: 1px solid var(--color-border-glass);
+  /* padding-box：别让卡片背景透进透明边框 —— 边框压在招牌色背景上会染成一条蓝线（尤其底边） */
+  background-clip: padding-box;
+  transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: card-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.folder-card:hover {
+  border-color: hsl(var(--fc) / 0.45);
+  transform: translateY(-4px) scale(1.02);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 20px 40px rgba(0, 0, 0, 0.55),
+    0 0 0 1px hsl(var(--fc) / 0.18),
+    0 0 32px hsl(var(--fc) / 0.20);
+}
+.folder-card:hover .folder-card-wash { opacity: 0.7; transform: scale(1.45); }
+
+/* 内容浮层开着：留一圈招牌色描边，指出浮层是从哪张卡弹出来的。
+   用 inset 描边而不是 outline：卡片在滚动容器里，outline 会被裁掉 */
+.folder-card.open {
+  border-color: hsl(var(--fc) / 0.8);
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--fc) / 0.45),
+    0 14px 32px rgba(0, 0, 0, 0.45),
+    0 0 30px hsl(var(--fc) / 0.22);
+}
+
+/* 底纹：首作封面大幅模糊，垫在拼图后面当氛围色。
+   scale 放大是必须的：blur 会把图的边缘吃成半透明，不放大就能看到四周一圈底色漏出来 */
+.folder-card-wash {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(42px) saturate(1.7) brightness(0.95);
+  transform: scale(1.35);
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity 0.45s ease, transform 0.45s ease;
+  -webkit-mask-image: radial-gradient(120% 95% at 28% 18%, #000 0%, rgba(0, 0, 0, 0.7) 45%, transparent 80%);
+  mask-image: radial-gradient(120% 95% at 28% 18%, #000 0%, rgba(0, 0, 0, 0.7) 45%, transparent 80%);
+}
+
+/* 暗化层：底纹之上的对比度底座。上浅下深 —— 上半部留给拼图，下半部压暗保证文字可读 */
+.folder-card-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom,
+      rgba(8, 10, 18, 0.28) 0%,
+      rgba(6, 8, 14, 0.34) 42%,
+      rgba(5, 7, 12, 0.72) 66%,
+      rgba(4, 6, 10, 0.93) 100%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.013) 0 1px, transparent 1px 3px);
+}
+
+/* ─── 自定义封面（替代拼图墙）───────────── */
+/* 设了封面就铺满整张卡，与拼图墙同层同几何（absolute inset 0）。底下的暗化层照常压住
+   下半部，底部信息块始终可读；悬停反馈和游戏卡一样走轻微放大 */
+.folder-card-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.folder-card:hover .folder-card-cover { transform: scale(1.04); }
+
+/* ─── 拼图墙 ─────────────────────────────── */
+/* 整张卡就是拼图区：底部不留白，最后一行滑到底部信息块的渐变下面（信息块压在上面）。
+   2×2 是默认几何 —— 卡片 2:3、格缝 5px，每格恰好接近 2:3，封面几乎不用裁 */
+.folder-card-mosaic {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  gap: 5px;
+  padding: 9px 9px 0;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  transition: gap 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 悬停 / 落点：格子散开一点，整面墙"呼吸"一下 */
+.folder-card:hover .folder-card-mosaic,
+.folder-card.drop-active .folder-card-mosaic { gap: 9px; }
+
+/* 1 个：单封面铺满 */
+.folder-card-mosaic[data-count="1"] {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+/* 2 个：并排。竖卡里满高会把封面裁成一条，宁可让两张 2:3 居中浮着 */
+.folder-card-mosaic[data-count="2"] {
+  grid-template-rows: 1fr;
+  align-items: center;
+}
+.folder-card-mosaic[data-count="2"] .folder-card-tile { aspect-ratio: 2/3; }
+/* 3 个：左边居中一张、右边居中两张。三张封面一律保持 2:3 原比例 ——
+   旧做法让左格跨两行铺满，格子宽高比掉到 0.37 左右，封面被裁掉近一半宽度，
+   看上去就是"被拉长了"。（1 张是整卡铺满，卡本身就是 2:3，不裁不拉） */
+.folder-card-mosaic[data-count="3"] {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto; /* 行高按封面自身比例算，整块再垂直居中 */
+  align-content: center;
+  align-items: center; /* 不加会把格子拉伸到行高，aspect-ratio 随之失效 */
+}
+.folder-card-mosaic[data-count="3"] .folder-card-tile { aspect-ratio: 2/3; }
+.folder-card-mosaic[data-count="3"] .folder-card-tile:first-child {
+  grid-row: span 2; /* 占住左列两行，才轮到后两张自动排进右列 */
+  align-self: center; /* 跨两行但不拉伸：按 2:3 取高，与右边那对同高居中 */
+}
+/* 4 个：两行两列（默认几何） */
+
+/* 一格 = 一张封面 */
+.folder-card-tile {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(10, 12, 20, 0.75);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.10),
+    0 6px 16px rgba(0, 0, 0, 0.45);
+}
+
+.folder-card-face {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 没有封面的成员：一块带招牌色的暗底 + 手柄图标，读起来是"这里有个游戏，只是没封面" */
+.folder-card-face-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: hsl(var(--fc) / 0.55);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.01));
+}
+
+/* 摆不下的那些：右下格换成 "+N"（整格都是招牌色，一眼看出"还有更多"） */
+.folder-card-tile-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    linear-gradient(150deg, hsl(var(--fc) / 0.34), hsl(var(--fc) / 0.10) 68%, rgba(10, 12, 20, 0.85)),
+    rgba(10, 12, 20, 0.9);
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--fc) / 0.45),
+    0 6px 16px rgba(0, 0, 0, 0.45);
+}
+.folder-card-tile-count span {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── 底部信息块 ─────────────────────────── */
+.folder-card-meta {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 26px 16px 14px;
+  background: linear-gradient(to top, rgba(4, 6, 10, 0.96) 0%, rgba(4, 6, 10, 0.78) 58%, transparent 100%);
+}
+
+/* 眉毛字：小号全大写 + 大字距，压一行「这是什么东西」的标签 */
+.folder-card-eyebrow {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: hsl(var(--fc) / 0.9);
+  line-height: 1;
+}
+
+.folder-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.folder-card-glyph { color: hsl(var(--fc)); flex-shrink: 0; }
+
+.folder-card-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.22;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* 空文件夹 / 拖入落点提示：占住拼图区（下半部留给底部信息块）居中 */
+.folder-card-empty,
+.folder-card-drop {
+  position: absolute;
+  inset: 0 0 30% 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.folder-card-empty { color: var(--color-text-tertiary); }
+.folder-card-empty svg { color: hsl(var(--fc) / 0.5); }
+.folder-card-drop { color: hsl(var(--fc)); font-size: 12px; font-weight: 600; }
+
+/* 有游戏正被拖到这张卡上：描边收紧 + 轻微放大，落点一眼可见。
+   第一行的卡是贴着滚动容器上沿的（容器没有上内边距），所以这两处都得往盒子里收：
+   - 放大从**顶边**起算，只往下长（下面就是 16px 行距，放得下）。按中心放大时上沿会顶出
+     容器、被 overflow-y 裁掉一条 —— 第一行的文件夹卡看起来就是「上边被切了一块」
+   - 强调环走 2px 内描边（border-width），不写 0 0 0 2px 那种外描边；外描边同样会被上沿裁掉
+     （与 .folder-card.open 用 inset 描边的理由同源）。盒模型是 border-box，卡的外框尺寸不变 */
+.folder-card.drop-active {
+  border-width: 2px;
+  border-color: hsl(var(--fc));
+  transform: scale(1.03);
+  transform-origin: center top;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 20px 40px rgba(0, 0, 0, 0.5),
+    0 0 36px hsl(var(--fc) / 0.35);
+}
+
+/* ─── 窄卡（列数拉到两位数）─── 拼图在这种尺寸下会糊成一片，只留两张 */
+.folder-card.compact .folder-card-mosaic { gap: 4px; padding: 6px 6px 0; }
+.folder-card.compact .folder-card-tile { border-radius: 7px; }
+.folder-card.compact .folder-card-tile-count span { font-size: 12px; }
+.folder-card.compact .folder-card-meta { padding: 18px 10px 10px; }
+.folder-card.compact .folder-card-name { font-size: 12.5px; }
+.folder-card.compact .folder-card-glyph { width: 11px; height: 11px; }
+.folder-card.compact .folder-card-foot { font-size: 9.5px; }
+
+/* ─── 文件夹内容浮层（点文件夹卡，从卡片旁边弹出）─── */
+/* 层级压在 100 以下（悬停预览 90 / 右键菜单 100 / 封面选择 110 / 详情 200）——
+   浮层里右键弹出的卡片菜单、以及从菜单再开出来的封面选择与详情，都必须在它上面。
+   不铺遮罩：游戏库原样留在周围，网格不重排，点别处收起 */
+.folder-popover {
+  position: fixed;
+  z-index: 85;
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  max-height: calc(100dvh - 16px);
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+/* 外部游戏拖到浮层上：整块亮一圈青色,示意「松手就放进这个文件夹」 */
+.folder-popover.drop-target {
+  border-color: rgba(0, 212, 255, 0.6);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(0, 212, 255, 0.55), 0 0 28px rgba(0, 212, 255, 0.3);
+}
+.folder-popover-body {
+  flex: 1;
+  min-height: 0;
+  /* 134px 卡片扣除边框后按 2:3 显示，外框高 200px；
+     三排 + 两道 12px 间隙 + 上下 12px 内边距，正好完整显示三排。 */
+  max-height: 648px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 12px;
+}
+/* 浮层里的卡片格：拖拽中原卡隐藏（走 .game-card.dragging），只留克隆跟随指针。
+   空出来的这一格显出落点框 —— 它随实时重排移动，就是「松手会落在这」的预览
+   （与主网格 .placing .library-slot-empty 同一套视觉语言）。
+   框用 outline 不用 border：border 占 2px 布局，拖拽一开始整格会缩一下 */
+.folder-view-cell.dragging {
+  cursor: grabbing;
+  border-radius: 16px;
+  outline: 1px dashed rgba(0, 212, 255, 0.22);
+  outline-offset: -1px;
+  background: rgba(0, 212, 255, 0.03);
+}
+/* 外部游戏拖进来时空出的占位格：虚线封面框，示意「松手落在这」。
+   撑一张封面的高（aspect-ratio 2/3），后面的成员卡顺势往后挤 */
+.folder-ext-ghost {
+  aspect-ratio: 2/3;
+  border-radius: 16px;
+  border: 1px dashed rgba(0, 212, 255, 0.5);
+  background: rgba(0, 212, 255, 0.06);
+}
+/* 已拖出面板：松手是移出文件夹、不会落回这一格，落点框跟着熄掉 */
+.folder-grid-out .folder-view-cell.dragging {
+  outline-color: transparent;
+  background: transparent;
+}
+/* 拖拽中压住卡片的悬停与过渡：原卡已隐藏，残留 hover 会让划过的几张卡一起亮起。
+   pointer-events 交给外层 .folder-view-cell 接 —— 命中判定找的就是它，落在格子上比落在卡面上稳 */
+.folder-grid-dragging .game-card {
+  animation: none;
+  transition: none !important;
+  pointer-events: none;
+}
+/* 克隆已拖出面板：松手就移出文件夹 —— 描边换成强调色，与底部提示同时变 */
+.drag-clone-out .game-card {
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6), 0 0 0 2px rgba(0, 212, 255, 0.9);
 }
 
 /* ─── 悬停预览卡 ──────────────────────────── */
@@ -984,7 +1419,7 @@ html:not(.dark) .hero-title { text-shadow: none; }
   overflow: hidden;
   background: #0e1018;   /* 实心底：任何子层缝隙只会露出底色，不会漏出页面背景 */
   border: 1px solid var(--color-border-glass);
-  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 html:not(.dark) .poster-frame { background: #e4e8f0; }
 
@@ -1008,6 +1443,13 @@ html:not(.dark) .poster-frame { background: #e4e8f0; }
   background: linear-gradient(to top, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.55) 55%, transparent 100%);
   z-index: 1;
   pointer-events: none;
+  /* 悬停时就地加深并长高，为展开的信息面板补足背衬 —— 单层渐变随之生长，
+     不再叠加第二层 hover 渐变，过渡途中不会出现忽明忽暗的横带 */
+  transition: height 0.15s cubic-bezier(0.22, 1, 0.36, 1), background 0.15s ease;
+}
+.poster-card:hover .poster-frame::after {
+  height: 72%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.72) 42%, rgba(0, 0, 0, 0.2) 78%, transparent 100%);
 }
 
 /* ─── 海报拖拽排序 ─────────────────────────── */
@@ -1036,15 +1478,13 @@ html:not(.dark) .poster-frame { background: #e4e8f0; }
   box-shadow: 0 26px 52px rgba(0, 0, 0, 0.6), 0 0 26px rgba(0, 212, 255, 0.18);
 }
 
-/* 各层过渡统一 0.3s / 同一缓动：时长不一致时，悬停途中会出现某层已变完、
-   另一层还在路上的中间态，看起来就是一条忽明忽暗的横带。
-   图片只调亮度、不做缩放 —— 缩放会让图片脱离裁剪框边缘一个亚像素 */
+/* 悬停各层过渡统一为 150ms，图片只调亮度、不做缩放。 */
 .poster-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
-  transition: filter 0.3s ease;
+  transition: filter 0.15s ease;
 }
 .poster-card:hover .poster-img {
   /* 底部滑入条自带渐变承载文字，图片不再大幅压暗：海报上部保持清晰可读 */
@@ -1061,11 +1501,14 @@ html:not(.dark) .poster-frame { background: #e4e8f0; }
   display: flex;
   align-items: center;
   gap: 6px;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.15s ease;
 }
 /* 悬停时进度环/徽章让位给底部信息条（信息条内已呈现进度与「已看完」） */
+/* 移出时等播放信息淡出后再恢复角标，避免两者交叠；移入节奏不变。 */
+.poster-card .poster-ring,
+.poster-card .poster-badges { transition-duration: 0.08s; transition-delay: 0.04s; }
 .poster-card:hover .poster-ring,
-.poster-card:hover .poster-badges { opacity: 0; }
+.poster-card:hover .poster-badges { opacity: 0; transition-duration: 0.15s; transition-delay: 0s; }
 
 .poster-done {
   display: inline-flex;
@@ -1089,10 +1532,11 @@ html:not(.dark) .poster-frame { background: #e4e8f0; }
   width: 30px;
   height: 30px;
   border-radius: 50%;
+  pointer-events: none;   /* 纯展示：悬停时全宽播放按钮会覆到此角，不能让它拦截点击 */
   /* 不用 backdrop-filter：每张海报一个实例，会各自建合成层采样背景；
      底色已近全黑且压在封面图上，模糊看不出来 */
   background: rgba(0, 0, 0, 0.62);
-  transition: opacity 0.25s ease;
+  transition: opacity 0.15s ease;
 }
 .poster-ring svg { width: 100%; height: 100%; display: block; transform: rotate(-90deg); }
 .poster-ring-track { fill: none; stroke: rgba(255, 255, 255, 0.2); stroke-width: 3; }
@@ -1121,29 +1565,69 @@ html:not(.dark) .poster-frame { background: #e4e8f0; }
   color: #9ae6ff;
 }
 
-/* 悬停信息条：底部滑入（Netflix 式），元信息为主。
-   图片上部保持清晰，仅底部渐变条承载文字；整条上滑 + 淡入，卡片几何不动 */
-.poster-hover {
+/* 底部信息面板：标题 + 元信息常驻（全卡唯一文字层，绝不重复渲染、绝不交叉淡入）。
+   悬停时在其上方「就地展开」进度条与播放按钮，标题随面板自然升高 —— 单元素位移，
+   不存在两套标题以不同字号/位置淡入淡出造成的双影。旧版 caption + hover 双层叠放
+   正是「原本的字和新弹出的字同时可见」的根因。 */
+.poster-info {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 2;
-  padding: 14px 14px 12px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 7px;
-  opacity: 0;
-  transform: translateY(14px);
-  pointer-events: none;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.72) 55%, transparent 100%);
-  transition: opacity 0.25s ease, transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;   /* 文字区点击穿透到卡片（打开详情）；播放按钮单独恢复可点 */
 }
-.poster-card:hover .poster-hover {
+.poster-info-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #fff;
+  padding-right: 34px;    /* 让出右下角进度环/「已看完」徽标，标题不与其重叠 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.poster-info-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+/* 展开容器：grid 0fr→1fr 按内容真实高度平滑展开，无需猜测 max-height、无回弹、无截断 */
+.poster-info-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  /* 收起先等内容淡出，再回落标题；展开仍立即开始。 */
+  transition: grid-template-rows 0.08s cubic-bezier(0.22, 1, 0.36, 1) 0.04s;
+}
+.poster-card:hover .poster-info-reveal {
+  grid-template-rows: 1fr;
+  transition-duration: 0.15s;
+  transition-delay: 0s;
+}
+/* 内容底边固定在面板底部，展开时只向上腾出空间。
+   子项不参与 flex 压缩，避免行高不足时按钮被挤扁；不再叠加向下位移，
+   保证按钮及阴影始终留在海报裁剪框内。收起态仅淡出，不拦截点击。 */
+.poster-info-extra {
+  min-height: 0;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 9px;
+  padding-top: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.04s ease;
+}
+.poster-info-extra > * { flex-shrink: 0; }
+.poster-card:hover .poster-info-extra {
   opacity: 1;
-  transform: translateY(0);
   pointer-events: auto;
+  transition-duration: 0.15s;
 }
 
 /* 手柄焦点：青色选中框（内侧粗描边 + 底部投影 + 外扩光晕 + 图片微提亮）。
@@ -1164,21 +1648,6 @@ html:not(.dark) .poster-frame { background: #e4e8f0; }
   filter: brightness(1.08) saturate(1.04);
 }
 
-.poster-hover-title {
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1.3;
-  color: #fff;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.poster-hover-meta {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.62);
-}
-/* 已看完：绿色信号，替代进度条 */
 .poster-hover-done {
   display: inline-flex;
   align-items: center;
@@ -1213,18 +1682,13 @@ html:not(.dark) .poster-frame { background: #e4e8f0; }
   font-variant-numeric: tabular-nums;
   color: #9ae6ff;
 }
-.poster-hover-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 3px;
-}
-
 .poster-play {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 7px 13px;
+  width: 100%;
+  padding: 8px 13px;
   border-radius: 100px;
   font-size: 12px;
   font-weight: 700;
@@ -1233,41 +1697,10 @@ html:not(.dark) .poster-frame { background: #e4e8f0; }
   background: var(--color-accent);
   border: none;
   cursor: pointer;
-  box-shadow: 0 6px 20px rgba(0, 212, 255, 0.4);
-  transition: transform 0.2s, background 0.2s;
+  box-shadow: 0 2px 8px rgba(0, 212, 255, 0.35);  /* 阴影收在按钮到卡片底边的留白内,不触及 frame 的 overflow 裁切线 */
+  transition: transform 0.15s, background 0.15s;
 }
-.poster-play:hover { background: #33ddff; transform: scale(1.04); }
-
-.poster-caption {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 3;
-  /* 纯展示层，必须让点击穿透：它盖在悬停层之上（z3 > z2），
-     即使 opacity 为 0 也照样吃掉事件 —— 播放按钮正好落在这块区域，会点不到 */
-  pointer-events: none;
-  padding: 26px 44px 12px 12px; /* 右侧 44px 让给右下角进度环，标题不与其重叠 */
-  /* 渐变已移至 .poster-frame::after 常驻层，这里只放标题文字 */
-  transition: opacity 0.3s;
-}
-.poster-card:hover .poster-caption { opacity: 0; }
-
-.poster-name {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
-  color: #fff;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.poster-sub {
-  margin-top: 3px;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.55);
-}
+.poster-play:hover { background: #33ddff; transform: scale(1.03); }
 
 /* ─── 影院式详情页 ─────────────────────────── */
 .detail-scroll { scroll-behavior: smooth; }
@@ -1651,10 +2084,9 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
    left 对齐列表的 px-6；right 由 JS 按滚动条宽度改写 */
 .music-hl {
   position: absolute;
-  left: 24px;
-  right: 24px;
   top: 0;
-  height: 64px; /* = ROW_H - 2，与行外层等高 */
+  /* left / width / height / top 全部由 JS 按当前布局算（单列整行宽、多列按列宽），
+     见 MusicView 的 paintHl —— 这里写死尺寸会在多列下框错格子 */
   box-sizing: border-box;
   border: 1px solid var(--color-border-glass);
   border-radius: 12px; /* = rounded-xl */
@@ -1664,11 +2096,24 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
   transition: none;
 }
 
-/* 音乐库行入场渐出：与游戏库封面同款 card-enter（translateY + scale + 淡入） */
-.music-row-enter {
-  animation: card-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
+/* 列间错拍、行内轻推：保持文字尺寸，用小位移与淡入形成节奏。
+   静止时保留相同变换，收尾不切换绘制路径。 */
+.music-row {
+  transform: translate3d(0, 0, 0);
 }
-
+@keyframes music-row-reveal {
+  from {
+    opacity: 0;
+    transform: translate3d(var(--music-enter-x, 0px), var(--music-enter-y, 5px), 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+.music-row-enter {
+  animation: music-row-reveal 120ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
 /* 音乐库行手柄选中：收敛高亮 —— 覆盖通用 .gamepad-focus 的大外扩框
    （outline 2px + offset 2px + 4px ring + 24px 辉光），改为贴行边缘的内侧细描边
    + 柔和光晕，选中框面积明显减小 */
@@ -2072,7 +2517,7 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 4px;
+  margin-bottom: 12px; /* 原来标题下还有一行小字（已删），间距接到这里 */
 }
 .stats-col-head h2 {
   display: flex;
@@ -2092,15 +2537,6 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
   text-overflow: ellipsis;
 }
 
-.stats-col-sub {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px 12px;
-  font-size: 11.5px;
-  color: var(--color-text-tertiary);
-  margin-bottom: 12px;
-}
-.stats-col-sub b { font-weight: 700; color: var(--color-text-secondary); }
 
 /* ─── 列内横向行列表：一行只有一个项目；超出列高时列内滚动 ───
    滚动条贴到列卡片右缘：负 margin 抵消列的右 padding（16px），
@@ -2273,7 +2709,8 @@ html:not(.dark) .stats-row-cover { background: #e4e8f0; }
 }
 
 /* ─── 空态 / 加载态 ─── */
-.stats-empty-orb {
+/* 统计页 + 三库共用的空状态 orb：圆形 + 内部径向光晕 + float 浮动 */
+.empty-orb {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2484,6 +2921,58 @@ html:not(.dark) .game-preview-card .text-text-secondary {
 html:not(.dark) .game-preview-placeholder .text-text-tertiary {
   color: rgba(148, 163, 184, 0.85);
 }
+
+/* 文件夹卡在浅色主题下：整体反过来 —— 白底 + 淡招牌色，文字走深色。
+   拼图本身是封面图，不受主题影响，只把"底"和"字"换掉 */
+html:not(.dark) .folder-card {
+  background:
+    linear-gradient(165deg, hsl(var(--fc) / 0.26) 0%, hsl(var(--fc) / 0.05) 42%, #eef1f7 76%),
+    #eef1f7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+html:not(.dark) .folder-card:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 20px 40px rgba(0, 0, 0, 0.16),
+    0 0 0 1px hsl(var(--fc) / 0.25),
+    0 0 32px hsl(var(--fc) / 0.18);
+}
+html:not(.dark) .folder-card-wash { opacity: 0.3; }
+html:not(.dark) .folder-card:hover .folder-card-wash { opacity: 0.42; }
+/* 浅色下不用整片压暗，只在底部留一层白纱保证文字对比度（拼图要清爽） */
+html:not(.dark) .folder-card-scrim {
+  background:
+    linear-gradient(to bottom,
+      rgba(255, 255, 255, 0.06) 0%,
+      rgba(255, 255, 255, 0.05) 46%,
+      rgba(255, 255, 255, 0.62) 70%,
+      rgba(255, 255, 255, 0.94) 100%),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.012) 0 1px, transparent 1px 3px);
+}
+/* 白底上白色的内描边看不见 → 换深色描边 */
+html:not(.dark) .folder-card-tile {
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 6px 16px rgba(0, 0, 0, 0.16);
+}
+html:not(.dark) .folder-card-face-blank {
+  color: hsl(var(--fc) / 0.6);
+  background: linear-gradient(160deg, rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.01));
+}
+html:not(.dark) .folder-card-tile-count {
+  background:
+    linear-gradient(150deg, hsl(var(--fc) / 0.34), hsl(var(--fc) / 0.12) 68%, rgba(255, 255, 255, 0.92)),
+    #fff;
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--fc) / 0.5),
+    0 6px 16px rgba(0, 0, 0, 0.16);
+}
+html:not(.dark) .folder-card-tile-count span { color: hsl(var(--fc)); text-shadow: none; }
+html:not(.dark) .folder-card-meta {
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.97) 0%, rgba(255, 255, 255, 0.8) 58%, transparent 100%);
+}
+html:not(.dark) .folder-card-foot { color: rgba(0, 0, 0, 0.45); }
+html:not(.dark) .folder-card-empty { color: rgba(0, 0, 0, 0.4); }
 
 /* 剧集行状态色：浅色主题下 #34d399/#5eead4 在白底对比度不足，
    换深绿/深青，行背景与描边也加深一档（状态可辨） */

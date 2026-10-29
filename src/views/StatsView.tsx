@@ -1,11 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BarChart3, Gamepad2, Film, Music, Clock } from 'lucide-react';
+import { BarChart3, Gamepad2, Film, Music, Clock, RectangleHorizontal, Trash2 } from 'lucide-react';
+import { message } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '../store';
 import { useFocusIndex, useFocusStore, useGamepadGroup, useRightStickScrollIf } from '../gamepad';
 import type { Stats, TopEntry } from '../types';
+import * as api from '../api';
 import { RowCard, longDur, MEDIA_COLORS } from '../components/StatsCovers';
 import StatsAdjustModal from '../components/StatsAdjustModal';
+import CoverPickerModal from '../components/CoverPickerModal';
 import { useT } from '../i18n';
 
 // label/unit/countLabel 存 i18n key，渲染时 t() 取词
@@ -101,18 +104,11 @@ function ColSection({ stats, section, colOrder, onOpenMenu }: {
 
   return (
     <section className="stats-col" style={{ ['--cc' as string]: section.color }}>
+      {/* 标题行下面原本有一行小字（次数 / 已玩 X/Y / 已看集数），已按要求删掉；
+          间距由 .stats-col-head 的下外边距接管 */}
       <div className="stats-col-head">
         <h2><Icon size={15} />{t(section.label)}</h2>
         <span className="stats-col-total">{longDur(d.total_seconds)}</span>
-      </div>
-
-      <div className="stats-col-sub">
-        {/* 次数只给音乐；游戏/影视只有时长和库存 */
-        section.key === 'music' && d.play_count > 0 && <b>{d.play_count.toLocaleString()} {t(section.countLabel!)}</b>}
-        <span>{d.played_count}/{d.library_count} {t(section.unit)}</span>
-        {section.key === 'video' && (
-          <span>{t('stats.watchedEpisodes', { watched: stats.total_watched_episodes, total: stats.total_episodes })}</span>
-        )}
       </div>
 
       {top.length > 0 ? (
@@ -145,9 +141,10 @@ export default function StatsView() {
   // 隐藏的库 → 统计页去掉对应列（数据一次拉全量，只影响展示）
   const hiddenLibraries = useAppStore((s) => s.hiddenLibraries);
   const [error, setError] = useState<string | null>(null);
-  // 游戏行右键菜单与「调整时长」弹窗（均为纯鼠标功能，不注册手柄组）
+  // 游戏行右键菜单、「调整时长」弹窗、换悬停封面弹窗（均为纯鼠标功能，不注册手柄组）
   const [menu, setMenu] = useState<{ x: number; y: number; entry: TopEntry } | null>(null);
   const [adjusting, setAdjusting] = useState<TopEntry | null>(null);
+  const [coverEntry, setCoverEntry] = useState<TopEntry | null>(null);
 
   useEffect(() => {
     setError(null);
@@ -160,6 +157,20 @@ export default function StatsView() {
       await loadStats();
     } catch (e) {
       setError(typeof e === 'string' ? e : (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  // 删掉一条「库外」统计记录：库里没有这个游戏、也没有它的归档，删的就是统计页这条历史本身
+  const deleteRecord = async (entry: TopEntry) => {
+    if (!confirm(t('stats.deleteRecordConfirm', { name: entry.name }))) return;
+    try {
+      await api.deleteStatsEntry(entry.id);
+      await refreshStats();
+    } catch (err) {
+      await message(
+        t('stats.deleteRecordFailed', { msg: typeof err === 'string' ? err : ((err as any)?.message ?? String(err)) }),
+        { title: t('stats.deleteRecord'), kind: 'error' },
+      );
     }
   };
 
@@ -199,7 +210,7 @@ export default function StatsView() {
     return (
       <div className="h-full flex items-center justify-center px-8">
         <div className="text-center animate-fade-up">
-          <div className="stats-empty-orb mx-auto mb-6"><BarChart3 size={38} /></div>
+          <div className="empty-orb mx-auto mb-6"><BarChart3 size={38} /></div>
           <h2 className="text-xl font-bold mb-2">{t('stats.emptyTitle')}</h2>
           <p className="text-sm text-text-secondary max-w-sm mx-auto leading-relaxed">
             {t('stats.emptyDesc')}
@@ -237,6 +248,23 @@ export default function StatsView() {
           name={menu.entry.name}
           onClose={() => setMenu(null)}
           onAdjust={() => setAdjusting(menu.entry)}
+          // 「库外记录」（存档行，id 形如 game:app:<appid>）也能换封面 —— 后端认这种 key，
+          // 写的是 stats_archive 的 wide_path；库里没有这个游戏/归档时才给「删去这条记录」
+          onChangeBanner={() => setCoverEntry(menu.entry)}
+          onDelete={menu.entry.id.startsWith('game:') ? () => void deleteRecord(menu.entry) : null}
+        />
+      )}
+
+      {/* 更换悬停封面弹窗：行上的封面就是横屏图，所以只取横屏候选（等效游戏库的「更换悬停封面」） */}
+      {coverEntry && (
+        <CoverPickerModal
+          game={coverEntry}
+          kind="wide"
+          onClose={() => setCoverEntry(null)}
+          onApplied={() => {
+            setCoverEntry(null);
+            void refreshStats();
+          }}
         />
       )}
 
@@ -257,10 +285,12 @@ export default function StatsView() {
 
 /** 游戏行右键菜单：样式对齐 SeriesContextMenu（glass-card + context-menu-item + 视口 clamp）。
  *  纯鼠标功能，不注册手柄焦点组；统计页只有行上有右键，空白右键/外部点击/Esc 都可关闭 */
-function StatsRowMenu({ x, y, name, onAdjust, onClose }: {
+function StatsRowMenu({ x, y, name, onChangeBanner, onDelete, onAdjust, onClose }: {
   x: number;
   y: number;
   name: string;
+  onChangeBanner: () => void | null;
+  onDelete: (() => void) | null; // null = 库里的游戏（行有实体，删除走右键菜单里那套）
   onAdjust: () => void;
   onClose: () => void;
 }) {
@@ -304,6 +334,20 @@ function StatsRowMenu({ x, y, name, onAdjust, onClose }: {
       onContextMenu={(e) => e.preventDefault()}
     >
       <div className="glass-card w-52 py-1.5 animate-scale-in">
+        {/* 换悬停封面：图标/文案与游戏库卡片右键菜单那一项对齐（同一件事） */}
+        {onChangeBanner && (
+          <>
+            <button
+              onClick={() => { onClose(); onChangeBanner(); }}
+              className="context-menu-item"
+              title={name}
+            >
+              <RectangleHorizontal size={14} className="text-text-secondary" />
+              {t('games.changeBanner')}
+            </button>
+            <div className="context-menu-divider" />
+          </>
+        )}
         <button
           onClick={() => { onClose(); onAdjust(); }}
           className="context-menu-item"
@@ -312,6 +356,20 @@ function StatsRowMenu({ x, y, name, onAdjust, onClose }: {
           <Clock size={14} className="text-[#00d4ff]" />
           {t('stats.adjustDuration')}
         </button>
+        {/* 库外记录才有：库里既没有这个游戏、也没有它的归档 —— 删的就是统计页这条历史 */}
+        {onDelete && (
+          <>
+            <div className="context-menu-divider" />
+            <button
+              onClick={() => { onClose(); onDelete(); }}
+              className="context-menu-item text-danger"
+              title={name}
+            >
+              <Trash2 size={14} />
+              {t('stats.deleteRecord')}
+            </button>
+          </>
+        )}
       </div>
     </div>,
     document.body,

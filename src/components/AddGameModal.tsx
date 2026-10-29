@@ -137,11 +137,12 @@ export default function AddGameModal({ onClose }: Props) {
   const labelClass = 'flex items-center gap-1.5 text-xs font-medium text-text-secondary mb-2';
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center p-5" onClick={onClose}>
+    // 点窗口外不关闭：手动添加填了半天，误点空白处丢内容太亏。只走右上角叉/取消/Esc 关
+    <div className="fixed inset-0 z-[300] flex items-center justify-center p-5">
       <div className="absolute inset-0 bg-black/75 backdrop-blur-md animate-fade-in" />
 
       <div
-        className="relative w-[92vw] max-w-4xl overflow-hidden glass-modal shadow-2xl animate-scale-in"
+        className="relative w-[92vw] max-w-2xl overflow-hidden glass-modal shadow-2xl animate-scale-in"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 顶部氛围光 */}
@@ -184,9 +185,10 @@ export default function AddGameModal({ onClose }: Props) {
             </div>
           )}
 
-          <div className="grid grid-cols-[1fr_220px] gap-5 max-md:grid-cols-1">
-            <div className="space-y-5">
-              <section className="glass-card p-4 hover:transform-none">
+          {/* 单列表单：右侧那块假封面预览 + 「封面/标签 添加后再设」纯属噪音，已删。
+              封面和标签都在添加后的详情里编辑，这里只收「名称/程序/目录/参数」四项 */}
+          <div className="space-y-5">
+            <section className="glass-card p-4 hover:transform-none">
                 <label className={labelClass}>
                   <Layers size={13} />
                   {t('games.name')} <span className="text-[#00d4ff]">*</span>
@@ -271,31 +273,6 @@ export default function AddGameModal({ onClose }: Props) {
                   placeholder={t('games.launchArgsPlaceholder')}
                 />
               </section>
-            </div>
-
-            <aside className="glass-card p-4 flex flex-col justify-between min-h-[240px] hover:transform-none">
-              <div>
-                <div className="w-full aspect-[4/5] rounded-2xl bg-gradient-to-br from-[#00d4ff]/18 via-[#0066ff]/10 to-bg-surface border border-border-glass flex items-center justify-center mb-4 overflow-hidden">
-                  <div className="w-16 h-16 rounded-2xl bg-[#00d4ff]/12 border border-[#00d4ff]/25 flex items-center justify-center glow-accent">
-                    <Gamepad2 size={30} className="text-[#00d4ff]" />
-                  </div>
-                </div>
-                <p className="text-sm font-semibold truncate">{name.trim() || t('games.newGame')}</p>
-                <p className="mt-1 text-xs text-text-secondary break-all line-clamp-3">
-                  {exePath.trim() || t('games.pathPreviewHint')}
-                </p>
-              </div>
-              <div className="mt-4 pt-4 border-t border-border-glass space-y-2 text-xs text-text-secondary">
-                <div className="flex items-center justify-between">
-                  <span>{t('games.coverLabel')}</span>
-                  <span className="text-text-tertiary">{t('games.setAfterAdd')}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>{t('games.tagsLabel')}</span>
-                  <span className="text-text-tertiary">{t('games.editAfterAdd')}</span>
-                </div>
-              </div>
-            </aside>
           </div>
 
           {/* Footer */}

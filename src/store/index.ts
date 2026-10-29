@@ -3,7 +3,7 @@ import { create } from 'zustand';
 // 游戏库每行卡片数的可调范围（设置页滑杆）
 export const MIN_GAME_COLUMNS = 3;
 export const MAX_GAME_COLUMNS = 12;
-import type { Game, GameFilter, Playlist, Series, SeriesCard, Stats, ThemeMode, Track } from '../types';
+import type { Game, GameFilter, GameFolder, MusicLayout, Playlist, Series, SeriesCard, Stats, ThemeMode, Track } from '../types';
 import * as api from '../api';
 import { parseLrc, type LrcLine } from '../utils/lyrics';
 
@@ -34,6 +34,7 @@ async function currentTimedLyrics(): Promise<LrcLine[] | null> {
 interface AppState {
   // ─── Data ───────────────────────────────
   games: Game[];
+  gameFolders: GameFolder[];  // 游戏库文件夹（成员 id 在 folder.game_ids 里）
   series: SeriesCard[];   // 含季数/集数/已看数等统计（get_series_library）
   tracks: Track[];        // 音乐曲目
   playlists: Playlist[];  // 歌单（含每歌单曲目 id，前端本地过滤）
@@ -61,6 +62,7 @@ interface AppState {
   selectedSeasonId: string | null;
   theme: ThemeMode;
   gameColumns: number;   // 游戏库每行卡片数（设置页可调，写入 settings 表持久化）
+  musicLayout: MusicLayout; // 音乐库列表形态：single 单列（原布局）/ multi 紧凑多列
   brandName: string;     // 自定义软件名称（设置页「软件标识」，空 = ZEX）
   brandCover: string;    // 自定义封面路径（空 = 内置 logo）
   contentVisible: boolean; // false = 界面画成空白帧，收进托盘前的准备动作
@@ -71,6 +73,7 @@ interface AppState {
 
   // ─── Actions ────────────────────────────
   loadGames: () => Promise<void>;
+  loadGameFolders: () => Promise<void>;
   loadSeries: () => Promise<void>;
   loadTracks: () => Promise<void>;
   loadPlaylists: () => Promise<void>;
@@ -85,6 +88,7 @@ interface AppState {
   setSelectedSeasonId: (id: string | null) => void;
   setTheme: (theme: ThemeMode) => void;
   setGameColumns: (n: number) => void;
+  setMusicLayout: (v: MusicLayout) => void;
   saveBrandName: (name: string) => Promise<void>;
   saveBrandCover: (path: string) => Promise<void>;
   resetBrandCover: () => Promise<void>;
@@ -98,9 +102,18 @@ interface AppState {
   createGame: (game: Omit<Game, 'id' | 'created_at' | 'updated_at' | 'total_seconds' | 'steam_appid'>) => Promise<Game>;
   updateGame: (id: string, game: Partial<Game>) => Promise<void>;
   deleteGame: (id: string) => Promise<void>;
-  reorderGames: (orderedIds: string[]) => Promise<void>;
   launchGame: (id: string) => Promise<void>;
   setRunningGameId: (id: string | null) => void;
+
+  // 文件夹：setLibrarySlots 写顶层格号（游戏与文件夹共用一个格号空间，落位 / 交换都走它），
+  // reorderFolderGames 写文件夹内顺序（文件夹内部仍是密排列表）。
+  // setGamesFolder 的 order 可选：同一次落地就把目标文件夹的最终顺序写好（拖到文件夹中间插入时用）
+  createGameFolder: (name: string, gameIds: string[], slot: number) => Promise<GameFolder>;
+  renameGameFolder: (id: string, name: string) => Promise<void>;
+  dissolveGameFolder: (id: string) => Promise<void>;
+  setGamesFolder: (gameIds: string[], folderId: string | null, order?: string[]) => Promise<void>;
+  setLibrarySlots: (items: Array<{ key: string; slot: number }>) => Promise<void>;
+  reorderFolderGames: (folderId: string, orderedIds: string[]) => Promise<void>;
 
   createSeries: (series: Omit<Series, 'id' | 'created_at' | 'updated_at'>) => Promise<Series>;
   updateSeries: (id: string, series: Partial<Series>) => Promise<void>;
@@ -145,6 +158,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   // ─── Initial Data ──────────────────────
   games: [],
+  gameFolders: [],
   series: [],
   tracks: [],
   playlists: [],
@@ -171,6 +185,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedSeasonId: null,
   theme: 'dark',
   gameColumns: 8,
+  musicLayout: 'single',
   brandName: '',
   brandCover: '',
   contentVisible: true,
@@ -209,6 +224,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       ? await api.filterGames(filter)
       : await api.getAllGames();
     set({ games });
+  },
+
+  loadGameFolders: async () => {
+    const gameFolders = await api.getGameFolders();
+    set({ gameFolders });
   },
 
   loadSeries: async () => {
@@ -256,6 +276,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     const clamped = Math.max(MIN_GAME_COLUMNS, Math.min(MAX_GAME_COLUMNS, Math.round(n)));
     set({ gameColumns: clamped });
     void api.setSetting('game_columns', String(clamped)).catch(() => {});
+  },
+
+  // 音乐库列表形态：立即生效 + 落库（失败只影响下次启动的默认值）
+  setMusicLayout: (v) => {
+    set({ musicLayout: v });
+    void api.setSetting('music_layout', v).catch(() => {});
   },
 
   // 品牌名/封面（设置页「软件标识」）：立即生效 + 落库，空 = 默认 ZEX/内置 logo
@@ -323,6 +349,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (brandName) set({ brandName });
     const brandCover = await api.getSetting('brand_cover').catch(() => null);
     if (brandCover) set({ brandCover });
+    // 音乐库形态：白名单校验，未存过（null）保持默认单列
+    const ml = await api.getSetting('music_layout').catch(() => null);
+    if (ml === 'single' || ml === 'multi') set({ musicLayout: ml });
   },
 
   createGame: async (game) => {
@@ -340,25 +369,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deleteGame: async (id) => {
     await api.deleteGame(id);
-    set((s) => ({ games: s.games.filter((g) => g.id !== id), selectedGameId: null }));
-  },
-
-  // 拖拽排序：先本地重排（与清拖拽同帧渲染，卡片从让位位置直接过渡到最终位置，避免先弹回再落位的闪烁），再持久化
-  reorderGames: async (orderedIds) => {
-    set((s) => {
-      const byId = new Map(s.games.map((g) => [g.id, g]));
-      const head = orderedIds.map((id) => byId.get(id)).filter((g): g is Game => Boolean(g));
-      const rest = s.games.filter((g) => !orderedIds.includes(g.id)); // 拖拽期间新增的追加末尾
-      return { games: [...head, ...rest] };
-    });
-    try {
-      await api.reorderGames(orderedIds);
-    } catch {
-      await get().loadGames(); // 失败回滚到后端顺序
-    }
+    set((s) => ({
+      games: s.games.filter((g) => g.id !== id),
+      // 成员行后端已随 ON DELETE CASCADE 清掉，前端同步摘掉，否则文件夹计数还显示着这个游戏
+      gameFolders: s.gameFolders.map((f) => (f.game_ids.includes(id)
+        ? { ...f, game_ids: f.game_ids.filter((gid) => gid !== id) }
+        : f)),
+      selectedGameId: null,
+    }));
   },
 
   launchGame: async (id) => {
+    if (get().games.find((g) => g.id === id)?.archive_status) return;
     await api.launchGame(id);
     set({ runningGameId: id });
     // 游戏起来了就把窗口让出去，等效点右上角的叉（时长仍由后端线程照常累计）
@@ -366,6 +388,93 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setRunningGameId: (id) => set({ runningGameId: id }),
+
+  // ─── 游戏库文件夹 ───────────────────────
+  // 全部走「本地先改 + 失败重载回滚」：拖拽/右键的反馈必须是同帧的
+
+  createGameFolder: async (name, gameIds, slot) => {
+    const folder = await api.createGameFolder(name, gameIds, slot);
+    set((s) => ({ gameFolders: [...s.gameFolders, folder] }));
+    return folder;
+  },
+
+  renameGameFolder: async (id, name) => {
+    const prev = get().gameFolders;
+    set((s) => ({ gameFolders: s.gameFolders.map((f) => (f.id === id ? { ...f, name } : f)) }));
+    try {
+      await api.renameGameFolder(id, name);
+    } catch (err) {
+      set({ gameFolders: prev }); // 重名/空名被后端拒绝 → 退回旧名，错误抛给调用方弹提示
+      throw err;
+    }
+  },
+
+  // 解散：游戏回到顶层（后端只删文件夹，成员行 CASCADE 清掉），顺序由各自 sort_order 决定，
+  // 本地拿不准最终位置 → 重载一次游戏列表拿后端权威顺序
+  dissolveGameFolder: async (id) => {
+    await api.dissolveGameFolder(id);
+    set((s) => ({ gameFolders: s.gameFolders.filter((f) => f.id !== id) }));
+    await get().loadGames();
+  },
+
+  setGamesFolder: async (gameIds, folderId, order) => {
+    const ids = new Set(gameIds);
+    const prev = get().gameFolders;
+    set((s) => ({
+      gameFolders: s.gameFolders.map((f) => {
+        // 先从所有文件夹里摘掉这些游戏（归属是排他的），再把目标文件夹设成最终顺序
+        const rest = f.game_ids.filter((gid) => !ids.has(gid));
+        if (f.id === folderId) return { ...f, game_ids: order ?? [...rest, ...gameIds] };
+        return rest.length === f.game_ids.length ? f : { ...f, game_ids: rest };
+      }),
+    }));
+    try {
+      await api.setGamesFolder(gameIds, folderId);
+      // 插入到文件夹中间（不是末尾）：归属落库后再写一次顺序。本地已经按 order 落地，
+      // 所以这里慢一点也不会闪 —— 顺序只在这两行之间是「先归属后顺序」的
+      if (order && folderId) await api.reorderFolderGames(folderId, order);
+    } catch (err) {
+      set({ gameFolders: prev });
+      throw err;
+    }
+  },
+
+  // 落位（绝对格号，游戏与文件夹共用一个格号空间）。本地先改，这样松手那一帧的布局
+  // 就是最终布局，不会先弹回再落位
+  setLibrarySlots: async (items) => {
+    const gameSlot = new Map<string, number>();
+    const folderSlot = new Map<string, number>();
+    for (const it of items) {
+      if (it.key.startsWith('g:')) gameSlot.set(it.key.slice(2), it.slot);
+      else if (it.key.startsWith('f:')) folderSlot.set(it.key.slice(2), it.slot);
+    }
+    set((s) => ({
+      games: gameSlot.size === 0 ? s.games : s.games.map((g) => {
+        const slot = gameSlot.get(g.id);
+        return slot === undefined ? g : { ...g, slot };
+      }),
+      gameFolders: folderSlot.size === 0 ? s.gameFolders : s.gameFolders.map((f) => {
+        const slot = folderSlot.get(f.id);
+        return slot === undefined ? f : { ...f, slot };
+      }),
+    }));
+    try {
+      await api.setLibrarySlots(items);
+    } catch {
+      await Promise.all([get().loadGames(), get().loadGameFolders()]);
+    }
+  },
+
+  reorderFolderGames: async (folderId, orderedIds) => {
+    set((s) => ({
+      gameFolders: s.gameFolders.map((f) => (f.id === folderId ? { ...f, game_ids: orderedIds } : f)),
+    }));
+    try {
+      await api.reorderFolderGames(folderId, orderedIds);
+    } catch {
+      await get().loadGameFolders();
+    }
+  },
 
   createSeries: async (series) => {
     const created = await api.createSeries(series);

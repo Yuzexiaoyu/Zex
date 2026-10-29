@@ -8,6 +8,7 @@ import { HardDrive, X, ArrowRight, Film, XCircle, AlertTriangle, Loader2, Check,
 import type { DiskVolume, SeriesDiskEntry, SeriesMoveResult } from '../types';
 import { useModalGamepad } from '../gamepad';
 import { useT } from '../i18n';
+import { useDiskManagerLayout } from '../utils/useDiskManagerLayout';
 
 // 待移动项（剧 id → 迁移方案，同剧多次拖拽以后一次为准）
 interface MoveItem {
@@ -50,7 +51,8 @@ function safeFolderName(name: string): string {
 
 export default function SeriesDiskManagerModal({ onClose }: Props) {
   const t = useT();
-  const [volumes, setVolumes] = useState<DiskVolume[]>([]);
+  const modalRef = useDiskManagerLayout();
+  const [volumes, setVolumes] = useState<DiskVolume[]>(api.getCachedDiskVolumes);
   const [entries, setEntries] = useState<SeriesDiskEntry[]>([]);
   const [moves, setMoves] = useState<Record<string, MoveItem>>({});
   const [volumeError, setVolumeError] = useState('');
@@ -79,8 +81,14 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
   useModalGamepad('modal:series-disk-manager', { onClose: guardedClose, esc: !drag });
 
   useEffect(() => {
-    api.getDiskVolumes().then(setVolumes).catch((e) => setVolumeError(String(e)));
-    api.getSeriesDiskLayout().then(setEntries).catch(() => {});
+    let cancelled = false;
+    api.preloadDiskVolumes()
+      .then((volumes) => { if (!cancelled) setVolumes(volumes); })
+      .catch((e) => { if (!cancelled) setVolumeError(String(e)); });
+    api.getSeriesDiskLayout()
+      .then((entries) => { if (!cancelled) setEntries(entries); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   // 读取持久化的隐藏卷列表（settings: series_disk_manager_hidden_drives，与游戏磁盘管理分开）
@@ -339,11 +347,12 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
   const draggedSeries = drag ? entries.find((e) => e.seriesId === drag.id) : null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[300] flex items-center justify-center p-6" onClick={guardedClose}>
+    <div className="disk-manager-overlay fixed inset-0 z-[300] flex items-start justify-center px-6" onClick={guardedClose}>
       <div className="absolute inset-0 bg-black/75 backdrop-blur-md animate-fade-in" />
 
       <div
-        className="relative w-[94vw] max-w-6xl h-[90vh] glass-modal shadow-2xl animate-scale-in flex flex-col overflow-hidden"
+        ref={modalRef}
+        className="disk-manager-modal relative w-[94vw] max-w-6xl glass-modal shadow-2xl animate-scale-in flex flex-col overflow-visible"
         onClick={(e) => {
           e.stopPropagation();
           setShowDrivePanel(false); // 点击弹窗内面板外的任意处收起「显示卷」面板
@@ -439,20 +448,20 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
         </div>
 
         {/* 磁盘卡网格 */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-6">
+        <div data-disk-body className="disk-manager-body shrink-0 min-h-0 p-6">
           {volumes.length === 0 && !volumeError ? (
-            <div className="h-full flex flex-col items-center justify-center gap-3 text-text-tertiary">
+            <div className="min-h-40 flex flex-col items-center justify-center gap-3 text-text-tertiary">
               <Loader2 size={28} className="animate-spin" />
               <span className="text-sm">{t('disk.loading')}</span>
             </div>
           ) : visibleVolumes.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
+            <div className="min-h-40 flex flex-col items-center justify-center gap-2 text-text-tertiary">
               <HardDrive size={28} className="opacity-40" />
               <span className="text-sm">{t('disk.allHidden')}</span>
               <button onClick={() => setShowDrivePanel(true)} className="text-xs text-[#00d4ff] hover:underline">{t('disk.clickToShow')}</button>
             </div>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5 content-start">
+            <div data-disk-grid className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5 content-start">
               {visibleVolumes.map((v) => {
                 const list = entriesByDrive[v.drive] || [];
                 const free = previewFree(v.drive);
@@ -470,7 +479,7 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                   <div
                     key={v.drive}
                     ref={(el) => { volumeRefs.current[v.drive] = el; }}
-                    className={`glass-card p-5 flex flex-col hover:transform-none transition-all ${
+                    className={`disk-manager-card glass-card p-5 flex flex-col hover:transform-none ${
                       isDrop ? 'ring-2 ring-[#00d4ff]/70 border-[#00d4ff]/70' : ''
                     } ${over ? 'border-[#ef4444]/60' : ''}`}
                   >
@@ -523,47 +532,49 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                     )}
 
                     {/* 剧列表 */}
-                    <div className={`flex-1 min-h-0 space-y-2 ${list.length ? 'max-h-72 overflow-y-auto pr-2' : ''}`}>
-                      {list.length === 0 && (
-                        <div className={`h-20 rounded-xl border border-dashed flex items-center justify-center text-xs transition-colors ${
-                          isDrop ? 'border-[#00d4ff]/60 text-[#00d4ff] bg-[rgba(0,212,255,0.05)]' : 'border-border-glass text-text-tertiary'
-                        }`}>
-                          {isDrop ? t('disk.dropHere') : t('disk.noneSeries')}
-                        </div>
-                      )}
-                      {list.map((s) => {
-                        const isDragging = drag?.id === s.seriesId && drag.active;
-                        const target = moves[s.seriesId];
-                        return (
-                          <div
-                            key={s.seriesId}
-                            onPointerDown={(e) => handleCardPointerDown(e, s)}
-                            className={`group flex items-center gap-3 rounded-xl px-2.5 py-2 border cursor-grab active:cursor-grabbing transition-all hover:bg-bg-surface-active touch-none select-none ${
-                              isDragging ? 'opacity-40' : ''
-                            } ${target ? 'border-[#00d4ff]/40 bg-[rgba(0,212,255,0.06)]' : 'border-transparent'}`}
-                          >
-                            {s.posterPath ? (
-                              <img src={convertFileSrc(s.posterPath, 'covers')} className="w-10 h-[60px] rounded object-cover shrink-0 pointer-events-none" alt="" />
-                            ) : (
-                              <span className="w-10 h-[60px] rounded bg-gradient-to-br from-[#00d4ff]/18 to-bg-surface border border-border-glass flex items-center justify-center shrink-0 pointer-events-none">
-                                <Film size={15} className="text-text-tertiary" />
-                              </span>
-                            )}
-                            <div className="min-w-0 flex-1 pointer-events-none">
-                              <p className="text-sm font-medium text-text-primary truncate">{s.title}</p>
-                              <p className="text-[11px] text-text-tertiary truncate mt-0.5">
-                                {t('series.episodeCount', { n: s.files.length })} · {fmtBytes(s.totalSize)}
-                                {target && <span className="text-[#00d4ff]"> · {t('disk.movingTo', { drive: target.to })}</span>}
-                              </p>
-                            </div>
-                            {target && (
-                              <button onClick={() => removeMove(s.seriesId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
-                                <XCircle size={16} />
-                              </button>
-                            )}
+                    <div data-disk-list className="disk-manager-list disk-scroll-y flex-1 min-h-0">
+                      <div data-disk-content className="space-y-2">
+                        {list.length === 0 && (
+                          <div className={`h-20 rounded-xl border border-dashed flex items-center justify-center text-xs transition-colors ${
+                            isDrop ? 'border-[#00d4ff]/60 text-[#00d4ff] bg-[rgba(0,212,255,0.05)]' : 'border-border-glass text-text-tertiary'
+                          }`}>
+                            {isDrop ? t('disk.dropHere') : t('disk.noneSeries')}
                           </div>
-                        );
-                      })}
+                        )}
+                        {list.map((s) => {
+                          const isDragging = drag?.id === s.seriesId && drag.active;
+                          const target = moves[s.seriesId];
+                          return (
+                            <div
+                              key={s.seriesId}
+                              onPointerDown={(e) => handleCardPointerDown(e, s)}
+                              className={`group flex items-center gap-3 rounded-xl px-2.5 py-2 border cursor-grab active:cursor-grabbing transition-all hover:bg-bg-surface-active touch-none select-none ${
+                                isDragging ? 'opacity-40' : ''
+                              } ${target ? 'border-[#00d4ff]/40 bg-[rgba(0,212,255,0.06)]' : 'border-transparent'}`}
+                            >
+                              {s.posterPath ? (
+                                <img src={convertFileSrc(s.posterPath, 'covers')} className="w-10 h-[60px] rounded object-cover shrink-0 pointer-events-none" alt="" />
+                              ) : (
+                                <span className="w-10 h-[60px] rounded bg-gradient-to-br from-[#00d4ff]/18 to-bg-surface border border-border-glass flex items-center justify-center shrink-0 pointer-events-none">
+                                  <Film size={15} className="text-text-tertiary" />
+                                </span>
+                              )}
+                              <div className="min-w-0 flex-1 pointer-events-none">
+                                <p className="text-sm font-medium text-text-primary truncate">{s.title}</p>
+                                <p className="text-[11px] text-text-tertiary truncate mt-0.5">
+                                  {t('series.episodeCount', { n: s.files.length })} · {fmtBytes(s.totalSize)}
+                                  {target && <span className="text-[#00d4ff]"> · {t('disk.movingTo', { drive: target.to })}</span>}
+                                </p>
+                              </div>
+                              {target && (
+                                <button onClick={() => removeMove(s.seriesId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
+                                  <XCircle size={16} />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 );
@@ -574,35 +585,37 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
 
         {/* 待移动方案列表（纵向） */}
         {moveCount > 0 && !applying && results.length === 0 && (
-          <div className="shrink-0 border-t border-border-glass px-6 pt-3 pb-2">
-            <div className="flex items-center justify-between mb-2">
+          <div data-disk-queue className="disk-manager-queue shrink-0 min-h-0 flex flex-col border-t border-border-glass px-6 pt-3 pb-2">
+            <div className="shrink-0 flex items-center justify-between mb-2">
               <p className="text-xs font-medium text-text-secondary">{t('disk.plans')}</p>
               <span className="text-[11px] text-text-tertiary">{t('disk.plansSummarySeries', { n: moveCount })}</span>
             </div>
-            <div className="disk-scroll-y max-h-44 overflow-y-auto space-y-1.5 pr-1">
-              {Object.values(moves).map((m) => (
-                <div key={m.seriesId} className="flex items-center gap-3 rounded-xl px-3 py-2 bg-[rgba(0,212,255,0.05)] border border-[rgba(0,212,255,0.15)]">
-                  <span className="shrink-0 w-9 h-9 rounded-lg bg-bg-surface border border-border-glass flex items-center justify-center text-xs font-bold text-text-secondary">
-                    {m.from.replace(':', '')}
-                  </span>
-                  <ArrowRight size={12} className="shrink-0 text-[#00d4ff]" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-text-primary truncate leading-tight">
-                      {m.title}
-                      <span className="ml-1.5 text-xs font-normal text-text-tertiary">{fmtBytes(m.size)}</span>
-                    </p>
-                    <p className="text-[11px] font-mono text-[#00d4ff] truncate leading-tight mt-0.5" title={m.targetPath}>{m.targetPath}</p>
+            <div data-disk-list className="disk-manager-list disk-scroll-y min-h-0 flex-1">
+              <div data-disk-content className="space-y-1.5">
+                {Object.values(moves).map((m) => (
+                  <div key={m.seriesId} className="flex items-center gap-3 rounded-xl px-3 py-2 bg-[rgba(0,212,255,0.05)] border border-[rgba(0,212,255,0.15)]">
+                    <span className="shrink-0 w-9 h-9 rounded-lg bg-bg-surface border border-border-glass flex items-center justify-center text-xs font-bold text-text-secondary">
+                      {m.from.replace(':', '')}
+                    </span>
+                    <ArrowRight size={12} className="shrink-0 text-[#00d4ff]" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-text-primary truncate leading-tight">
+                        {m.title}
+                        <span className="ml-1.5 text-xs font-normal text-text-tertiary">{fmtBytes(m.size)}</span>
+                      </p>
+                      <p className="text-[11px] font-mono text-[#00d4ff] truncate leading-tight mt-0.5" title={m.targetPath}>{m.targetPath}</p>
+                    </div>
+                    <button onClick={() => removeMove(m.seriesId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
+                      <XCircle size={16} />
+                    </button>
                   </div>
-                  <button onClick={() => removeMove(m.seriesId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
-                    <XCircle size={16} />
-                  </button>
-                </div>
-              ))}
-              {unknownCount > 0 && (
-                <div className="flex items-center gap-1.5 text-[11px] text-amber-500 px-1 pt-0.5">
-                  <AlertTriangle size={12} /> {t('disk.unknownSeries', { n: unknownCount })}
-                </div>
-              )}
+                ))}
+                {unknownCount > 0 && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-amber-500 px-1 pt-0.5">
+                    <AlertTriangle size={12} /> {t('disk.unknownSeries', { n: unknownCount })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -637,16 +650,21 @@ export default function SeriesDiskManagerModal({ onClose }: Props) {
                   {results.map((r) => (
                     <span
                       key={r.seriesId}
-                      title={r.error ?? undefined}
+                      title={r.warning ?? r.error ?? undefined}
                       className={`shrink-0 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border max-w-lg ${
-                        r.ok
+                        r.ok && r.warning
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
+                          : r.ok
                           ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
                           : 'bg-[#ef4444]/10 border-[#ef4444]/30 text-[#ef4444]'
                       }`}
                     >
-                      {r.ok ? <Check size={12} className="shrink-0" /> : <AlertTriangle size={12} className="shrink-0" />}
+                      {r.ok && !r.warning ? <Check size={12} className="shrink-0" /> : <AlertTriangle size={12} className="shrink-0" />}
                       <span className="truncate min-w-0">{r.title || t('disk.unknownTitle')}</span>
-                      {r.ok ? t('disk.moved') : (
+                      {r.ok ? (
+                        // 移动成功：源被占用未删净时显警告标签，完整说明在 title 悬浮
+                        <span className="truncate">{r.warning ? t('disk.movedLeftover') : t('disk.moved')}</span>
+                      ) : (
                         <span className="truncate">
                           {/* 取消/拒绝的长文本（含细节）放 title，chip 内截断不溢出 */}
                           {(r.error ?? '').includes('移动已取消')

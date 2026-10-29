@@ -16,7 +16,7 @@ import SortMenu, { type SortOption, type SortMenuHandle } from '../components/So
 import SeriesDetail from './SeriesDetail';
 import * as api from '../api';
 import TmdbPickerModal from '../components/TmdbPickerModal';
-import type { SeriesCard, TmdbSearchResult } from '../types';
+import type { MediaType, SeriesCard, TmdbSearchResult } from '../types';
 import { coverSrc, yearOf } from '../utils/media';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useFocusStore, useGamepadGroup, useGamepadFocus, useFocusIndex } from '../gamepad';
@@ -227,6 +227,15 @@ export default function SeriesView() {
   const heroDetailFocused = useGamepadFocus('hero', 1);
   const toolbarFocused = useFocusIndex('series-toolbar');
 
+  // 手柄焦点落在海报上时同步到 hoverId：复用鼠标「悬停即预览、移开保持」那套逻辑，
+  // 让 Hero 跟着方向键移动的焦点走。鼠标模式下 useFocusIndex 恒返回 -1，此 effect
+  // 不触发，Hero 照旧跟随鼠标 hover —— 两种输入互斥、各走各的、不打架
+  useEffect(() => {
+    if (posterFocused >= 0 && posterFocused < displayList.length) {
+      setHoverId(displayList[posterFocused].id);
+    }
+  }, [posterFocused, displayList]);
+
   // 海报网格组：A=进详情；「上」越顶行 → 工具栏「添加影视」那一行
   useGamepadGroup('grid:series', {
     count: displayList.length,
@@ -416,14 +425,14 @@ export default function SeriesView() {
     }
   };
 
-  const runFetch = async (s: SeriesCard, tmdbId?: number) => {
+  const runFetch = async (s: SeriesCard, tmdbId?: number, mediaType?: MediaType) => {
     // 全局防重入：状态在 store，切库回来也在，不会二次触发
     if (useAppStore.getState().metadataFetchingTitle) return;
     setFetchingTitle(s.title);
     setFetchPct(0);
     try {
       // 成功后不弹提示（界面刷新即为反馈）；失败仍弹错误
-      await api.autoFetchSeriesMetadata(s.id, tmdbId);
+      await api.autoFetchSeriesMetadata(s.id, tmdbId, mediaType);
       await loadSeries();
     } catch (err) {
       void message(t('series.fetchFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' });
@@ -443,7 +452,8 @@ export default function SeriesView() {
         return;
       }
       if (results.length === 1) {
-        void runFetch(s, results[0].id);
+        // 混合搜索可能命中另一类型（如电影被误录成剧集），把实际类型一并传给后端修正
+        void runFetch(s, results[0].id, results[0].media_type);
         return;
       }
       setPicker({ s, results });
@@ -471,14 +481,9 @@ export default function SeriesView() {
     >
       {series.length === 0 ? (
         <div className="h-full flex flex-col items-center justify-center gap-6">
-          <div className="relative">
-            <div className="w-32 h-32 rounded-3xl bg-gradient-to-br from-[#7c3aed]/10 to-[#00d4ff]/10 border border-[rgba(124,58,237,0.15)] flex items-center justify-center animate-float">
-              <Tv size={52} className="text-text-tertiary" />
-            </div>
-            <div className="absolute -inset-4 rounded-full bg-[#7c3aed]/5 blur-2xl animate-pulse" />
-          </div>
+          <div className="empty-orb"><Tv size={38} /></div>
           <div className="text-center">
-            <p className="text-xl font-semibold text-text-primary/70 mb-2">{t('series.emptyTitle')}</p>
+            <p className="text-xl font-bold mb-2">{t('series.emptyTitle')}</p>
             <p className="text-sm text-text-tertiary">{t('series.emptyDesc')}</p>
           </div>
           <button className="btn btn-accent gap-2 px-6 py-3 text-sm" onClick={() => setShowAddModal(true)}>
@@ -658,51 +663,47 @@ export default function SeriesView() {
                           </span>
                         )}
 
-                        {/* 悬停信息条：底部滑入，元信息为主（标题/年份季集/进度/播放），不放大段简介 */}
-                        <div className="poster-hover">
-                          <p className="poster-hover-title">{s.title}</p>
-                          <p className="poster-hover-meta">
+                        {/* 底部信息面板：标题/元信息常驻（全卡唯一文字层），悬停时就地展开
+                            进度与播放，标题随面板升高、不重复渲染、不交叉淡入 —— 杜绝旧版
+                            caption + hover 双层叠放时「原本的字和新弹出的字同时可见」的突兀感 */}
+                        <div className="poster-info">
+                          <p className="poster-info-title">{s.title}</p>
+                          <p className="poster-info-meta">
                             {(s.media_type === 'movie'
                               ? [yearOf(s.first_air_date), t('series.movie')]
                               : [yearOf(s.first_air_date), s.season_count > 0 ? t('series.seasonCount', { n: s.season_count }) : '', s.episode_count > 0 ? t('series.episodeCount', { n: s.episode_count }) : '']
                             ).filter(Boolean).join(' · ') || t('series.noInfo')}
                           </p>
-                          {done ? (
-                            <p className="poster-hover-done">
-                              <CheckCheck size={12} />
-                              {t('series.finished')}
-                            </p>
-                          ) : pct > 0 ? (
-                            <div className="poster-hover-progress">
-                              <div className="poster-hover-progress-track">
-                                <div className="poster-hover-progress-fill" style={{ width: `${pct}%` }} />
-                              </div>
-                              <span className="poster-hover-progress-text">{Math.round(pct)}%</span>
-                            </div>
-                          ) : null}
-                          {s.next_episode && (
-                            <div className="poster-hover-actions">
-                              <button
-                                className="poster-play"
-                                onClick={(e) => { e.stopPropagation(); void playNext(s); }}
-                              >
-                                <Play size={13} fill="currentColor" />
-                                {s.media_type === 'movie' ? t('series.playMovie') : (
-                                  t('series.playEp', { se: `S${String(s.next_episode.season_number).padStart(2, '0')}E${String(s.next_episode.episode_number).padStart(2, '0')}` })
+                          {(done || pct > 0 || s.next_episode) && (
+                            <div className="poster-info-reveal">
+                              <div className="poster-info-extra">
+                                {done ? (
+                                  <p className="poster-hover-done">
+                                    <CheckCheck size={12} />
+                                    {t('series.finished')}
+                                  </p>
+                                ) : pct > 0 ? (
+                                  <div className="poster-hover-progress">
+                                    <div className="poster-hover-progress-track">
+                                      <div className="poster-hover-progress-fill" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span className="poster-hover-progress-text">{Math.round(pct)}%</span>
+                                  </div>
+                                ) : null}
+                                {s.next_episode && (
+                                  <button
+                                    className="poster-play"
+                                    onClick={(e) => { e.stopPropagation(); void playNext(s); }}
+                                  >
+                                    <Play size={13} fill="currentColor" />
+                                    {s.media_type === 'movie' ? t('series.playMovie') : (
+                                      t('series.playEp', { se: `S${String(s.next_episode.season_number).padStart(2, '0')}E${String(s.next_episode.episode_number).padStart(2, '0')}` })
+                                    )}
+                                  </button>
                                 )}
-                              </button>
+                              </div>
                             </div>
                           )}
-                        </div>
-
-                        <div className="poster-caption">
-                          <p className="poster-name">{s.title}</p>
-                          <p className="poster-sub">
-                            {(s.media_type === 'movie'
-                              ? [yearOf(s.first_air_date), t('series.movie')]
-                              : [yearOf(s.first_air_date), s.season_count > 0 ? t('series.seasonCount', { n: s.season_count }) : '', s.episode_count > 0 ? t('series.episodeCount', { n: s.episode_count }) : '']
-                            ).filter(Boolean).join(' · ') || t('series.noInfo')}
-                          </p>
                         </div>
                       </div>
                     </div>
@@ -728,8 +729,8 @@ export default function SeriesView() {
                 <Film size={38} className="text-text-tertiary" />
               </div>
             )}
-            <div className="poster-caption">
-              <p className="poster-name">{draggedSeries.title}</p>
+            <div className="poster-info">
+              <p className="poster-info-title">{draggedSeries.title}</p>
             </div>
           </div>
         </div>,
@@ -742,7 +743,7 @@ export default function SeriesView() {
           title={picker.s.title}
           results={picker.results}
           currentId={picker.s.tmdb_id}
-          onPick={(id) => { const target = picker.s; setPicker(null); void runFetch(target, id); }}
+          onPick={(r) => { const target = picker.s; setPicker(null); void runFetch(target, r.id, r.media_type); }}
           onClose={() => setPicker(null)}
         />
       )}

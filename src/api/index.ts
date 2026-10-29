@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
-  Game, GameFilter, SteamGame, Series, Season, Episode, Stats,
+  Game, GameFilter, GameFolder, SteamGame, Series, Season, Episode, Stats,
   SeriesCard, SeriesDetailData, MediaType, TmdbSearchResult, DiskVolume, GameMoveResult,
   SeriesDiskEntry, SeriesMoveResult, Track, TrackPreview, Playlist,
 } from '../types';
@@ -50,12 +50,71 @@ export async function deleteGame(id: string): Promise<void> {
   return invoke('delete_game', { id });
 }
 
-export async function reorderGames(orderedIds: string[]): Promise<void> {
-  return invoke('reorder_games', { orderedIds });
+// ─── 游戏库：自由摆放 + 文件夹 ───────────────
+// 位置：游戏与文件夹共用一个绝对格号空间（games.slot / game_folders.slot），
+// 归属：game_folder_items（game_id 主键 = 排他）。模型详见 src-tauri/src/folders.rs 顶部注释
+
+export async function getGameFolders(): Promise<GameFolder[]> {
+  return invoke('get_game_folders');
+}
+
+// slot = 新文件夹钉在哪一格（0 基；前端传右键那张卡当前所在的格号）
+export async function createGameFolder(name: string, gameIds: string[], slot: number): Promise<GameFolder> {
+  return invoke('create_game_folder', { name, gameIds, slot });
+}
+
+export async function renameGameFolder(id: string, name: string): Promise<void> {
+  return invoke('rename_game_folder', { id, name });
+}
+
+// 解散：只删文件夹，里面的游戏回到库顶层原来的位置（游戏本身不删）
+export async function dissolveGameFolder(id: string): Promise<void> {
+  return invoke('dissolve_game_folder', { id });
+}
+
+// folderId = null → 移出文件夹回顶层
+export async function setGamesFolder(gameIds: string[], folderId: string | null): Promise<void> {
+  return invoke('set_games_folder', { gameIds, folderId });
+}
+
+// 落位：拖一张卡到某格 = 1 条；落到已被占的格上（两者交换）= 2 条。
+// key 为 'g:<游戏 id>' / 'f:<文件夹 id>'，游戏与文件夹共用一个格号空间
+export async function setLibrarySlots(items: Array<{ key: string; slot: number }>): Promise<void> {
+  return invoke('set_library_slots', { items });
+}
+
+export async function reorderFolderGames(folderId: string, orderedIds: string[]): Promise<void> {
+  return invoke('reorder_folder_games', { folderId, orderedIds });
+}
+
+// 本地选图设为文件夹封面（复制进 covers 目录，返回新路径）
+export async function setFolderCover(folderId: string, sourcePath: string): Promise<string> {
+  return invoke('set_folder_cover', { folderId, sourcePath });
+}
+
+// 恢复默认封面：清空自定义封面（卡片回到拼图墙），并删除 covers 目录里的旧图
+export async function clearFolderCover(folderId: string): Promise<void> {
+  return invoke('clear_folder_cover', { folderId });
+}
+
+/** 一张内置文件夹封面预设（随包分发的 folder-covers/，见 folders::get_folder_cover_presets） */
+export interface FolderCoverPreset {
+  name: string;
+  /** covers 目录里的副本路径：直接给 coverSrc 显示，也可以原样交给 setFolderCover */
+  path: string;
+}
+
+export async function fetchFolderCoverPresets(): Promise<FolderCoverPreset[]> {
+  return invoke('get_folder_cover_presets');
 }
 
 export async function setGameCover(gameId: string, sourcePath: string): Promise<string> {
   return invoke('set_game_cover', { gameId, sourcePath });
+}
+
+// 本地选图设为悬停封面（横屏）；主封面用 setGameCover
+export async function setGameBanner(gameId: string, sourcePath: string): Promise<string> {
+  return invoke('set_game_banner', { gameId, sourcePath });
 }
 
 export interface CoverOption {
@@ -79,6 +138,30 @@ export async function setGameCoverUrl(gameId: string, url: string): Promise<stri
 
 export async function setGameBannerUrl(gameId: string, url: string): Promise<string> {
   return invoke('set_game_banner_url', { gameId, url });
+}
+
+export interface SteamPlaytimeProgress {
+  done: number;
+  total: number;
+  added: number;
+}
+
+export interface SteamPlaytimeResult {
+  /** localconfig 里有时长的 appid 数 */
+  total: number;
+  /** 库里已有该 appid、按 Steam 时长校准过的 */
+  updated: number;
+  /** 写进统计页「库外时长」条目的 */
+  added: number;
+  /** 商店里查不到的条目（Spacewar / 运行库 / 下架）跳过数 */
+  skipped: number;
+  /** 实际导入的时长合计（秒） */
+  seconds: number;
+}
+
+/** 导入本机 Steam 游玩数据：库外的写进统计存档（统计页立即可见），库内的按较大值校准时长 */
+export async function importSteamPlaytime(): Promise<SteamPlaytimeResult> {
+  return invoke('import_steam_playtime');
 }
 
 export interface CoverFetchResult {
@@ -127,8 +210,78 @@ export async function openPath(path: string): Promise<void> {
 
 // ─── Disk Management ─────────────────────────
 
+export interface GameArchiveProgress {
+  gameId: string;
+  phase: 'preparing' | 'compressing' | 'verifying' | 'cleaning';
+  percent: number;
+}
+
+export interface GameArchiveResult {
+  archivePath: string;
+  archiveSize: number;
+  originalSize: number;
+  warning: string | null;
+}
+
+export async function compressGame(gameId: string, archivePath: string, level: 1 | 5 | 9): Promise<GameArchiveResult> {
+  return invoke('compress_game', { gameId, archivePath, level });
+}
+
+export async function cancelGameArchive(): Promise<void> {
+  return invoke('cancel_game_archive');
+}
+
+// 解压恢复：把已归档游戏的压缩包解回磁盘。进度复用 game-archive-progress 事件（phase 为 extracting/moving）。
+export interface GameRestoreProgress {
+  gameId: string;
+  phase: 'extracting' | 'moving';
+  percent: number;
+}
+
+export interface GameRestoreResult {
+  installDir: string;
+  archiveDeleted: boolean;
+  warning: string | null;
+}
+
+export async function decompressGame(gameId: string, targetDir: string, deleteArchive: boolean): Promise<GameRestoreResult> {
+  return invoke('decompress_game', { gameId, targetDir, deleteArchive });
+}
+
+// 导入已有的游戏压缩包（.7z）为一条「已归档」游戏；返回新游戏 id。
+export async function importArchive(archivePath: string): Promise<string> {
+  return invoke('import_archive', { archivePath });
+}
+
+// 磁盘管理里的强删：连盘上文件一起删（已归档删 .7z，普通游戏删整个安装目录）后再删库记录。
+export async function deleteGameAndFiles(id: string): Promise<void> {
+  return invoke('delete_game_and_files', { id });
+}
+
+// 两个磁盘管理弹窗共用会话快照：打开时先展示，容量在后台重新读取。
+let diskVolumesSnapshot: DiskVolume[] = [];
+let diskVolumesPreload: Promise<DiskVolume[]> | null = null;
+let diskVolumesRequest = 0;
+
+export function getCachedDiskVolumes(): DiskVolume[] {
+  return diskVolumesSnapshot;
+}
+
 export async function getDiskVolumes(): Promise<DiskVolume[]> {
-  return invoke('get_disk_volumes');
+  const request = ++diskVolumesRequest;
+  const volumes = await invoke<DiskVolume[]>('get_disk_volumes');
+  // 操作后的新请求优先，较早的慢枚举不能覆盖较新的缓存。
+  if (request === diskVolumesRequest) diskVolumesSnapshot = volumes;
+  return volumes;
+}
+
+// 启动预读与弹窗初次读取复用同一请求，避免同时枚举两遍网络映射盘。
+// 迁移/删除后的 getDiskVolumes 不复用预读，必须重新查询容量。
+export function preloadDiskVolumes(): Promise<DiskVolume[]> {
+  if (!diskVolumesPreload) {
+    diskVolumesPreload = getDiskVolumes().finally(() => { diskVolumesPreload = null; });
+  }
+  return diskVolumesPreload;
 }
 
 export async function getFolderSize(path: string): Promise<number> {
@@ -321,9 +474,14 @@ export async function deleteSeries(id: string): Promise<void> {
   return invoke('delete_series', { id });
 }
 
-// tmdbId：用户在候选里选定的条目（同名作品消歧）；不传则沿用已有 ID 或自动搜索
-export async function autoFetchSeriesMetadata(seriesId: string, tmdbId?: number): Promise<string> {
-  return invoke('auto_fetch_series_metadata', { seriesId, tmdbId: tmdbId ?? null });
+// tmdbId：用户在候选里选定的条目（同名作品消歧）；不传则沿用已有 ID 或自动搜索。
+// mediaType：选中候选的实际类型（混合搜索可能命中另一类型），与库里不同时后端按它抓取并修正条目
+export async function autoFetchSeriesMetadata(
+  seriesId: string,
+  tmdbId?: number,
+  mediaType?: 'tv' | 'movie',
+): Promise<string> {
+  return invoke('auto_fetch_series_metadata', { seriesId, tmdbId: tmdbId ?? null, mediaType: mediaType ?? null });
 }
 
 // 搜索 TMDB 候选（mediaType: 'tv' | 'movie'）
@@ -457,6 +615,11 @@ export async function setBrandCover(source: string): Promise<string> {
 
 // ─── Stats ────────────────────────────────
 
+/// 删掉统计页上的一条「库外」记录（stats_archive 行；库里没有这个游戏/归档时才有这一项）
+export async function deleteStatsEntry(key: string): Promise<void> {
+  return invoke('delete_stats_entry', { key });
+}
+
 export async function getStats(): Promise<Stats> {
   return invoke('get_stats');
 }
@@ -474,6 +637,16 @@ export async function getSetting(key: string): Promise<string | null> {
 
 export async function setSetting(key: string, value: string): Promise<void> {
   return invoke('set_setting', { key, value });
+}
+
+// 肃正协议：手动触发一次跨端进度对账（保存核心位置后立即同步一次）
+export async function triggerSync(): Promise<void> {
+  return invoke('trigger_sync');
+}
+
+// 肃正协议：关闭同步时删掉核心文件
+export async function syncPurge(): Promise<void> {
+  return invoke('sync_purge');
 }
 
 // 隐藏库（最多 2 个）：写入设置 + 后端联动 mpv 预加载（媒体库全隐藏时停掉空闲预热）

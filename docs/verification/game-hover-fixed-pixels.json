@@ -1,0 +1,386 @@
+[
+  {
+    "dpr": 1,
+    "hoverStyle": {
+      "hover": true,
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1.06, 0, 0, 1.06, 0, 0)"
+    },
+    "preStyle": {
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1.00001, 0, 0, 1.00001, 0, 0)",
+      "timings": [
+        {
+          "type": "CSSTransition",
+          "property": "border-bottom-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-left-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-right-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-top-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "box-shadow",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "opacity",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "opacity",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "background-color",
+          "duration": 200
+        },
+        {
+          "type": "CSSTransition",
+          "property": "box-shadow",
+          "duration": 200
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 200
+        }
+      ]
+    },
+    "finalStyle": {
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1, 0, 0, 1, 0, 0)"
+    },
+    "preEndVsFinal": {
+      "width": 117,
+      "height": 194,
+      "changedPixels": 237,
+      "changedBeyondRounding": 0,
+      "totalPixels": 22698,
+      "meanDifference": 0.005433665227479661,
+      "maxDifference": 2
+    },
+    "beforeVsAfter": {
+      "width": 117,
+      "height": 194,
+      "changedPixels": 841,
+      "changedBeyondRounding": 0,
+      "totalPixels": 22698,
+      "meanDifference": 0.019061885041266484,
+      "maxDifference": 2
+    }
+  },
+  {
+    "dpr": 1.25,
+    "hoverStyle": {
+      "hover": true,
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1.06, 0, 0, 1.06, 0, 0)"
+    },
+    "preStyle": {
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1.00001, 0, 0, 1.00001, 0, 0)",
+      "timings": [
+        {
+          "type": "CSSTransition",
+          "property": "border-bottom-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-left-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-right-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-top-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "box-shadow",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "opacity",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "opacity",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "background-color",
+          "duration": 200
+        },
+        {
+          "type": "CSSTransition",
+          "property": "box-shadow",
+          "duration": 200
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 200
+        }
+      ]
+    },
+    "finalStyle": {
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1, 0, 0, 1, 0, 0)"
+    },
+    "preEndVsFinal": {
+      "width": 146,
+      "height": 243,
+      "changedPixels": 0,
+      "changedBeyondRounding": 0,
+      "totalPixels": 35478,
+      "meanDifference": 0,
+      "maxDifference": 0
+    },
+    "beforeVsAfter": {
+      "width": 146,
+      "height": 243,
+      "changedPixels": 0,
+      "changedBeyondRounding": 0,
+      "totalPixels": 35478,
+      "meanDifference": 0,
+      "maxDifference": 0
+    }
+  },
+  {
+    "dpr": 1.5,
+    "hoverStyle": {
+      "hover": true,
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1.06, 0, 0, 1.06, 0, 0)"
+    },
+    "preStyle": {
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1.00001, 0, 0, 1.00001, 0, 0)",
+      "timings": [
+        {
+          "type": "CSSTransition",
+          "property": "border-bottom-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-left-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-right-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-top-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "box-shadow",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "opacity",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "opacity",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "background-color",
+          "duration": 200
+        },
+        {
+          "type": "CSSTransition",
+          "property": "box-shadow",
+          "duration": 200
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 200
+        }
+      ]
+    },
+    "finalStyle": {
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1, 0, 0, 1, 0, 0)"
+    },
+    "preEndVsFinal": {
+      "width": 176,
+      "height": 291,
+      "changedPixels": 137,
+      "changedBeyondRounding": 0,
+      "totalPixels": 51216,
+      "meanDifference": 0.0012821514110173903,
+      "maxDifference": 1
+    },
+    "beforeVsAfter": {
+      "width": 176,
+      "height": 291,
+      "changedPixels": 0,
+      "changedBeyondRounding": 0,
+      "totalPixels": 51216,
+      "meanDifference": 0,
+      "maxDifference": 0
+    }
+  },
+  {
+    "dpr": 2,
+    "hoverStyle": {
+      "hover": true,
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1.06, 0, 0, 1.06, 0, 0)"
+    },
+    "preStyle": {
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1.00001, 0, 0, 1.00001, 0, 0)",
+      "timings": [
+        {
+          "type": "CSSTransition",
+          "property": "border-bottom-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-left-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-right-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-top-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "box-shadow",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "opacity",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "opacity",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "background-color",
+          "duration": 200
+        },
+        {
+          "type": "CSSTransition",
+          "property": "box-shadow",
+          "duration": 200
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 200
+        }
+      ]
+    },
+    "finalStyle": {
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1, 0, 0, 1, 0, 0)"
+    },
+    "preEndVsFinal": {
+      "width": 234,
+      "height": 388,
+      "changedPixels": 9,
+      "changedBeyondRounding": 0,
+      "totalPixels": 90792,
+      "meanDifference": 0.00004405674508767292,
+      "maxDifference": 1
+    },
+    "beforeVsAfter": {
+      "width": 234,
+      "height": 388,
+      "changedPixels": 2188,
+      "changedBeyondRounding": 0,
+      "totalPixels": 90792,
+      "meanDifference": 0.011748465356712779,
+      "maxDifference": 2
+    }
+  }
+]

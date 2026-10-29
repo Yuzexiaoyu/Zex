@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ask, message } from '@tauri-apps/plugin-dialog';
 import { createPortal } from 'react-dom';
 import {
   Music, Plus, Search, Star, ArrowDownAZ, CalendarPlus,
   CheckSquare, Square, Trash2, Music2, ListMusic, GripVertical, ListPlus,
+  Rows3, LayoutGrid,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAppStore } from '../store';
@@ -33,9 +34,33 @@ const SORTS: SortOption[] = [
   { key: 'custom', label: 'music.sortCustom', hint: 'music.sortCustomHint', icon: GripVertical },
 ];
 
-// 曲目行高（px）：封面 44 + py 10×2 + 行间距 2。虚拟滚动的 estimateSize 和
-// 拖拽的目标槽位几何都用它 —— 改行的内边距/封面尺寸时必须同步改这里
-const ROW_H = 66;
+// 曲目行高（px）：单列 = 封面 44 + 上下留白 + 行间距 2；紧凑多列 = 封面 40 + 留白 + 间距 2。
+// 虚拟滚动的 estimateSize、悬停高亮块、拖拽目标槽位三处几何都从这里取值 ——
+// 改行的内边距/封面尺寸时只改这两个常量
+const ROW_H_SINGLE = 66;
+const ROW_H_MULTI = 54;
+// 多列几何：列间距 / 单列最小可用宽 / 列数上限。520 是「封面 + 两行文字 + 时长」
+// 读起来不挤的下限 —— 1920 窗口 → 3 列，1280 → 2 列，960（最小窗口）→ 1 列
+const COL_GAP = 12;
+const MIN_COL_W = 520;
+const MAX_COLS = 4;
+// 滚动容器的左右内边距（px-6 单侧 24）。悬停高亮和拖拽命中要把指针坐标换算成
+// 内容坐标，必须与容器实际 padding 同源（游戏库那边曾因写死值不符而整体偏移）
+const PAD_X = 24;
+
+// 四列用不同的起拍与收束速度；行内逐级推进，形成一遍轻快的列间波纹。
+const INTRO_COLUMNS = [
+  { duration: 104, offset: 0, step: 10, x: -3, y: 6 },
+  { duration: 120, offset: 22, step: 12, x: -1, y: 8 },
+  { duration: 136, offset: 44, step: 9, x: 1, y: 7 },
+  { duration: 112, offset: 66, step: 11, x: 3, y: 6 },
+] as const;
+const INTRO_SINGLE = { duration: 120, offset: 0, step: 10, x: 0, y: 5 };
+
+function musicIntro(row: number, column: number, multi: boolean) {
+  const profile = multi ? INTRO_COLUMNS[column % INTRO_COLUMNS.length] : INTRO_SINGLE;
+  return { ...profile, delay: profile.offset + row * profile.step };
+}
 
 // 秒 → "m:ss"，解析失败显示 "-:--"
 function fmtTime(seconds: number): string {
@@ -61,6 +86,9 @@ export default function MusicView() {
   // 每秒被 music-progress 覆写一次，订阅对象等于让整张曲目表每秒重画一遍
   const playingTrackId = useAppStore((s) => s.nowPlaying?.trackId);
   const musicPlaying = useAppStore((s) => s.nowPlaying?.playing ?? false);
+  // 列表形态：single 原单列（信息列最全）/ multi 紧凑多列（一屏曲目数约 3.6 倍）
+  const musicLayout = useAppStore((s) => s.musicLayout);
+  const setMusicLayout = useAppStore((s) => s.setMusicLayout);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [sort, setSort] = useState<SortKey>('custom');
@@ -76,6 +104,33 @@ export default function MusicView() {
   const [playlistMenu, setPlaylistMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const sortRef = useRef<SortMenuHandle>(null);
+  // 多列：列数由容器宽度实测（单列恒为 1），行高随形态变。下面所有几何都只认这两个值
+  const multi = musicLayout === 'multi';
+  const [cols, setCols] = useState(1);
+  const rowH = multi ? ROW_H_MULTI : ROW_H_SINGLE;
+  // 切换形态时保留「首个可见曲目」：像素偏移在两种布局里对应的曲目能差几十首，
+  // 不锚回去就是换一次布局跳一次位置
+  const anchorRef = useRef<number | null>(null);
+
+  // 列数 = 容器内容宽能放下几个 MIN_COL_W。切换形态和窗口缩放都走这一个算法
+  const measureCols = (isMulti: boolean) => {
+    const el = listRef.current;
+    if (!isMulti || !el) return 1;
+    const contentW = el.clientWidth - PAD_X * 2;
+    const n = Math.floor((contentW + COL_GAP) / (MIN_COL_W + COL_GAP));
+    return Math.max(1, Math.min(MAX_COLS, n));
+  };
+  // 窗口缩放时重算列数（单列模式不挂观察器）
+  useLayoutEffect(() => {
+    if (!multi) { setCols(1); return; }
+    const el = listRef.current;
+    if (!el) return;
+    const remeasure = () => setCols(measureCols(true));
+    remeasure();
+    const ro = new ResizeObserver(remeasure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [multi]);
 
   useEscIntercept(!!menu || !!bulkMenu || !!playlistMenu);
 
@@ -139,6 +194,9 @@ export default function MusicView() {
   const [everDragged, setEverDragged] = useState(false);
   const dragRef = useRef<NonNullable<typeof drag>>(null);
   const liveRef = useRef<Track[] | null>(null);
+  // 工作副本的 ref 和 state 必须成对更新：ref 给几何计算读（同步、不等渲染），
+  // state 给克隆渲染读。手写两行曾漏掉其中一半 → 小范围拖拽时那一项直接消失
+  const setLiveBoth = (arr: Track[] | null) => { liveRef.current = arr; setLiveTracks(arr); };
   const dragEnabled = sort === 'custom' && !query.trim() && filter === 'all' && !multiSelect;
   // 只有真正激活拖拽（移动超 4px）才屏蔽指针事件 —— pointerdown 未激活时若加
   // music-dragging，.music-dragging .music-row 的 pointer-events:none 会吞掉 click，
@@ -152,27 +210,35 @@ export default function MusicView() {
   //   1) 延迟必须按绝对行号算。用「本批虚拟行里的序号」算的话，批次窗口一滑动，
   //      已挂载行的 animation-delay 就被改写 —— 浏览器会重算动画本地时间、把运行中
   //      的动画拽回起始相位，整行连封面一起重闪一遍
-  //   2) 只有首屏那批行能拿动画。card-enter 是 both 填充，延迟期内 opacity:0；
+  //   2) 只有首屏那批行能拿动画。music-row-reveal 是 both 填充，延迟期内 opacity:0；
   //      滚动挂载进来的行若也加动画，行号一大就是几百 ms 的透明期 —— 那正是
   //      「入场没播完往下滚一片空白」
-  const [introRows, setIntroRows] = useState(0);
+  const [introCells, setIntroCells] = useState(0);
   const [introDone, setIntroDone] = useState(false);
   // 首屏能放几行。用 layout effect 而非 effect：它在首帧绘制前跑，setState 触发的
   // 重渲染也在绘制前完成。首帧 listRef 还是 null、虚拟化器量不到高度 → 一行都不渲染，
   // 所以不存在「先画了没动画的行、再补上动画」的闪
   useLayoutEffect(() => {
     const el = listRef.current;
-    if (el) setIntroRows(Math.ceil(el.clientHeight / ROW_H));
-  }, []);
-  // 窗口长度按首屏行数推（最后一行的延迟 + 动画 300ms + 余量），写死短了会把尾部行
-  // 掐停在半透明。起算点是「行真正出现」而不是挂载 —— loadTracks 慢于窗口时
-  // 整个入场动画会一次都没播就过期
+    if (el) setIntroCells(Math.ceil(el.clientHeight / rowH) * cols);
+  }, [rowH, cols]);
+  // 每列速度不同，按实际首屏成员的最晚结束时间收尾，避免截断慢列。
+  // 起算点是「行真正出现」而不是挂载，异步载入曲目也能完整播放入场。
   const hasRows = displayList.length > 0;
+  const introEnd = useMemo(() => {
+    let end = 0;
+    const count = Math.min(introCells, displayList.length);
+    for (let i = 0; i < count; i++) {
+      const timing = musicIntro(Math.floor(i / cols), i % cols, multi);
+      end = Math.max(end, timing.delay + timing.duration);
+    }
+    return end + 48;
+  }, [introCells, displayList.length, cols, multi]);
   useEffect(() => {
-    if (!introRows || !hasRows) return;
-    const id = setTimeout(() => setIntroDone(true), introRows * 30 + 420);
+    if (!introCells || !hasRows) return;
+    const id = setTimeout(() => setIntroDone(true), introEnd);
     return () => clearTimeout(id);
-  }, [introRows, hasRows]);
+  }, [introCells, hasRows, introEnd]);
 
   // ─── 指针高亮 ─────────────────────────────
   // 不走 CSS :hover —— Chromium 滚动时不刷新 hover 命中测试，滚轮滚动会把高亮
@@ -209,13 +275,21 @@ export default function MusicView() {
       || dragRef.current !== null || displayList.length === 0) { hideHl(); return; }
     const rect = el.getBoundingClientRect();
     const x = ptrClientXRef.current;
-    // 指针压在滚动条上（容器右缘）：拖滚动条时 Y→行 的映射没有意义，不亮
+    // 指针压在滚动条上（容器右缘）：拖滚动条时 坐标→格 的映射没有意义，不亮
     if (x !== null && x > rect.right - 14) { hideHl(); return; }
-    const cur = Math.max(0, Math.min(displayList.length - 1,
-      Math.floor((y - rect.top + el.scrollTop) / ROW_H)));
-    hl.style.top = `${cur * ROW_H - el.scrollTop}px`;
-    // 右缘让开滚动条，跟行宽严丝合缝（滚动条出现/消失时宽度会变，每次重算）
-    hl.style.right = `${24 + el.offsetWidth - el.clientWidth}px`;
+    // 列宽按容器实际内容宽算（clientWidth 已不含滚动条，出现/消失时每次重算）
+    const contentW = el.clientWidth - PAD_X * 2;
+    const slotW = (contentW - COL_GAP * (cols - 1)) / cols;
+    const row = Math.floor((y - rect.top + el.scrollTop) / rowH);
+    const col = cols === 1 ? 0 : Math.max(0, Math.min(cols - 1,
+      Math.floor(((x ?? rect.left + PAD_X) - rect.left - PAD_X) / (slotW + COL_GAP))));
+    const cur = row * cols + col;
+    // 行号越界、或末行右侧那些没有曲目的空格 → 不亮
+    if (row < 0 || cur < 0 || cur >= displayList.length) { hideHl(); return; }
+    hl.style.top = `${row * rowH - el.scrollTop}px`;
+    hl.style.left = `${PAD_X + col * (slotW + COL_GAP)}px`;
+    hl.style.width = `${slotW}px`;
+    hl.style.height = `${rowH - 2}px`;
     hl.style.opacity = '1';
   };
   const scheduleHl = () => { if (!hlRafRef.current) hlRafRef.current = requestAnimationFrame(paintHl); };
@@ -249,7 +323,7 @@ export default function MusicView() {
     hideHl(); // 同步灭掉，不等下一帧
   };
   // 列表内容变了（搜索/排序/删除）→ 原行号失配，按当前指针位置重算一次
-  useEffect(() => { paintHl(); }, [displayList.length]);
+  useEffect(() => { paintHl(); }, [displayList.length, rowH, cols]);
   // scrollend：滚动真正停止（含惯性尾段）时立刻恢复高亮，比 90ms 兜底快
   useEffect(() => {
     const el = listRef.current;
@@ -263,24 +337,63 @@ export default function MusicView() {
   }, []);
 
   // 虚拟滚动：172+ 曲全量渲染约 3k DOM 节点，每次重渲染都要重建整棵树。
-  // 行高固定（封面 44 + py 10×2 + space-y-0.5 间距 2 = 66），不需要动态测量，
-  // 与下方 getTargetIndex 的 step 同源 —— 改行高要两处一起改
+  // 单列一行一曲、多列一行 cols 曲；行高固定（rowH）不需要动态测量
   const rowVirtualizer = useVirtualizer({
-    count: displayList.length,
+    count: Math.ceil(displayList.length / cols),
     getScrollElement: () => listRef.current,
-    estimateSize: () => ROW_H,
-    overscan: 8,
+    estimateSize: () => rowH,
+    // 滚轮快滑时原生滚动跑在 React 重渲染前面，窗口外无行可显 → 一片纯白（连文字都
+    // 没有），停下才补齐。治它就是把 overscan 缓冲放大：每行的重活（封面 fetch / 解码）
+    // 都在 useEffect 里、发生在「绘制之后」，渲染阶段本身很轻，所以多备几行几乎不花钱、
+    // 是划算的。单列一行一曲，缓冲给到 24 最划算；多列一行 cols 曲、同样行数 DOM 翻几倍，
+    // 收敛到 16。封面请求再多也由 CoverImg 的并发闸兜住，不会因此拥塞
+    overscan: multi ? 16 : 24,
   });
 
-  // 目标槽位 = 被拖行中心映射到固定行高（纯几何，与数组顺序无关 → 无反馈回路）。
-  // 行高固定：封面 44 + py 10×2 + space-y-0.5 间距 2 ≈ 66；按被拖行实测高度算更稳
+  // 行高/列数变了：virtualizer 不会自己重跑 estimateSize，必须显式 measure，
+  // 否则总高度和每行 start 还是旧行高算出来的（行会重叠或留大片空白）。
+  // 紧接着把切换前记下的曲目锚回视口 —— measure 的新测量值要等一帧才可用
+  useLayoutEffect(() => {
+    rowVirtualizer.measure();
+    const a = anchorRef.current;
+    if (a === null) return;
+    anchorRef.current = null;
+    const id = requestAnimationFrame(() => {
+      rowVirtualizer.scrollToIndex(Math.floor(a / cols), { align: 'start' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [rowH, cols]);
+
+  // 切换形态：先记下首个可见曲目的绝对序号，换完由上面的 effect 滚回去。
+  // cols 必须和形态同一批次更新 —— 留给 ResizeObserver 晚一帧设的话，
+  // 上面的 effect 会先用旧列数把 anchor 折算一遍（切一次跳一次）
+  const toggleLayout = () => {
+    const first = rowVirtualizer.getVirtualItems()[0];
+    anchorRef.current = first ? first.index * cols : 0;
+    const next = multi ? 'single' : 'multi';
+    setCols(measureCols(next === 'multi'));
+    setMusicLayout(next);
+  };
+
+  // 目标槽位 = 被拖行中心映射到固定网格几何（纯几何，与数组顺序无关 → 无反馈回路）。
+  // 行按 rowH、列按槽宽，与虚拟滚动 estimateSize / 悬停高亮同源（都取 rowH、cols）
   const getTargetIndex = (d: NonNullable<typeof drag>, len: number): number => {
     const el = listRef.current;
     if (!el) return 0;
     const rect = el.getBoundingClientRect();
-    const step = ROW_H; // 已含 space-y-0.5 间距，与虚拟滚动 estimateSize 同源
     const centerY = d.y - d.grabDY + d.rowH / 2 - rect.top + el.scrollTop;
-    return Math.max(0, Math.min(len - 1, Math.floor(centerY / step)));
+    const row = Math.floor(centerY / rowH);
+    let col = 0;
+    if (cols > 1) {
+      const contentW = el.clientWidth - PAD_X * 2;
+      const slotW = (contentW - COL_GAP * (cols - 1)) / cols;
+      const centerX = d.x - d.grabDX + d.width / 2 - rect.left - PAD_X;
+      col = Math.max(0, Math.min(cols - 1, Math.floor(centerX / (slotW + COL_GAP))));
+    }
+    let idx = row * cols + col;
+    // 末行右侧的空格（没有曲目）→ 视为末尾，否则会把被拖行卡在不存在的槽位上
+    if (row >= Math.ceil(len / cols) - 1 && col >= (len % cols || cols)) idx = len - 1;
+    return Math.max(0, Math.min(len - 1, idx));
   };
 
   const handleRowPointerDown = (e: React.PointerEvent, t: Track) => {
@@ -308,8 +421,12 @@ export default function MusicView() {
     // 4px 阈值内视为点击（不建工作副本、不激活拖拽）
     if (!d.active && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < 4) return;
     if (!d.active) {
-      // 真正开始拖动才建工作副本（避免点击时整列表重渲染 = 假刷新）
-      if (liveRef.current === null) liveRef.current = [...baseList];
+      // 真正开始拖动才建工作副本（避免点击时整列表重渲染 = 假刷新）。
+      // 必须同时进 state：原行在 drag.active 那一刻就被 .drag-src 隐藏，而克隆
+      // 渲染读的是 liveTracks —— 只设 ref 的话，从激活到第一次跨槽位之间
+      // 「原行已隐」+「克隆未出」= 那一项凭空消失（多列下换列要横移一整个列宽，
+      // 这个窗口大到几乎每次小幅拖拽都能看见）
+      if (liveRef.current === null) setLiveBoth([...baseList]);
     }
     const el = listRef.current!;
     const rect = el.getBoundingClientRect();
@@ -327,7 +444,7 @@ export default function MusicView() {
         const nextArr = [...live];
         const [moved] = nextArr.splice(cur, 1);
         nextArr.splice(target, 0, moved);
-        setLiveTracks(nextArr); liveRef.current = nextArr;
+        setLiveBoth(nextArr);
       }
     }
     setDrag({ ...next, active: true }); dragRef.current = { ...next, active: true };
@@ -338,7 +455,7 @@ export default function MusicView() {
     dragRef.current = null; // 收尾统一置空：残留的 ref 会让结束后的幽灵监听继续当 active 拖拽处理
     if (!d) return;
     const live = liveRef.current;
-    setDrag(null); setLiveTracks(null); liveRef.current = null;
+    setDrag(null); setLiveBoth(null);
     // 数组已是最终顺序，只需持久化（store 先本地重排再写入，失败自行回滚）
     if (d.active && live && d.from !== live.findIndex((x) => x.id === d.id)) {
       await reorderTracks(live.map((t) => t.id));
@@ -348,13 +465,13 @@ export default function MusicView() {
   const onDragKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') { // 取消：丢弃工作数组，回到后端顺序
       dragRef.current = null;
-      setDrag(null); setLiveTracks(null); liveRef.current = null;
+      setDrag(null); setLiveBoth(null);
     }
   };
 
   const onDragCancel = () => {
     dragRef.current = null;
-    setDrag(null); setLiveTracks(null); liveRef.current = null;
+    setDrag(null); setLiveBoth(null);
   };
 
   // 拖拽监听挂在 window 上，随「是否有拖拽」挂/卸（与 SeriesView 同款写法）：
@@ -383,11 +500,11 @@ export default function MusicView() {
   // 移不到顶部导航行（游戏库/影视库/音乐库 tab 那行）；切库走肩键
   useGamepadGroup('music-list', {
     count: displayList.length,
-    cols: 1,
+    cols,
     activate: (i) => { const t = displayList[i]; if (t) handlePlay(t); },
-    // 虚拟滚动下屏外行不在 DOM 里，必须走 virtualizer 定位
+    // 虚拟滚动下屏外行不在 DOM 里，必须走 virtualizer 定位；多列时序号要先折成行号
     // （旧写法 listRef.children[i] 取到的是包裹层而非行，一直没生效过）
-    scrollIntoView: (i) => rowVirtualizer.scrollToIndex(i, { align: 'auto' }),
+    scrollIntoView: (i) => rowVirtualizer.scrollToIndex(Math.floor(i / cols), { align: 'auto' }),
   });
   const listFocused = useFocusIndex('music-list');
   // 右摇杆滚动目标：音乐库列表容器
@@ -474,6 +591,8 @@ export default function MusicView() {
       onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
     >
       {/* ─── 工具栏 ──────────────────────────── */}
+      {/* 空库时与影视库一致：整页只显示空态，工具栏不出现（空态自带「添加音乐」按钮） */}
+      {tracks.length > 0 && (
       <div className="shrink-0 px-6 py-4 flex items-center gap-3 flex-wrap">
         <button className="btn btn-accent gap-2 text-sm" onClick={() => setShowAddModal(true)}>
           <Plus size={15} />
@@ -530,6 +649,15 @@ export default function MusicView() {
         ) : (
           <div className="ml-auto flex items-center gap-2.5">
             <span className="text-xs text-text-tertiary tabular-nums">{t('music.trackCount', { n: tracks.length })}</span>
+            {/* 列表形态切换：与排序按钮同款胶囊，显示的是「当前」形态 */}
+            <button
+              onClick={toggleLayout}
+              className="sort-trigger"
+              title={t('music.layoutSwitchTo', { mode: multi ? t('music.layoutSingle') : t('music.layoutMulti') })}
+            >
+              {multi ? <LayoutGrid size={14} /> : <Rows3 size={14} />}
+              <span className="font-medium text-text-primary">{multi ? t('music.layoutMulti') : t('music.layoutSingle')}</span>
+            </button>
             <SortMenu
               ref={sortRef}
               value={sort}
@@ -539,6 +667,7 @@ export default function MusicView() {
           </div>
         )}
       </div>
+      )}
 
       {/* ─── 曲目列表 ────────────────────────── */}
       {/* 外壳不滚动：只作为指针高亮块的定位参照和裁剪框。高亮块必须待在滚动内容
@@ -553,14 +682,9 @@ export default function MusicView() {
         className={clsx('h-full overflow-y-auto px-6 pb-6', dragging && 'music-dragging', everDragged && 'music-drag-suppress')}>
         {tracks.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center gap-6">
-            <div className="relative">
-              <div className="w-32 h-32 rounded-3xl bg-gradient-to-br from-[#7c3aed]/10 to-[#00d4ff]/10 border border-[rgba(124,58,237,0.15)] flex items-center justify-center animate-float">
-                <Music size={52} className="text-text-tertiary" />
-              </div>
-              <div className="absolute -inset-4 rounded-full bg-[#7c3aed]/5 blur-2xl animate-pulse" />
-            </div>
+            <div className="empty-orb"><Music size={38} /></div>
             <div className="text-center">
-              <p className="text-xl font-semibold text-text-primary/70 mb-2">{t('music.emptyTitle')}</p>
+              <p className="text-xl font-bold mb-2">{t('music.emptyTitle')}</p>
               <p className="text-sm text-text-tertiary">{t('music.emptyDesc')}</p>
             </div>
             <button className="btn btn-accent gap-2 px-6 py-3 text-sm" onClick={() => setShowAddModal(true)}>
@@ -576,116 +700,141 @@ export default function MusicView() {
         ) : (
           <div className="relative w-full" style={{ height: rowVirtualizer.getTotalSize() }}>
             {rowVirtualizer.getVirtualItems().map((vRow) => {
-              const trk = displayList[vRow.index];
-              const idx = vRow.index;
-              if (!trk) return null;
-              // 入场动画只发给首屏那批行，且延迟按绝对行号算（见上方 introRows 注释）
-              const introRow = !everDragged && !introDone && idx < introRows;
+              // 单列一行一曲；多列一行 cols 曲（末行可能不满）
+              const rowStart = vRow.index * cols;
+              const rowTracks = displayList.slice(rowStart, rowStart + cols);
+              if (rowTracks.length === 0) return null;
               return (
-              // 外层只管虚拟定位：card-enter 入场动画会动 transform，
+              // 外层只管虚拟定位与分列：入场动画会动 transform，
               // 与定位 transform 写在同一元素上会互相覆盖 → 行飞到错位置
               <div
-                key={trk.id}
-                className="absolute left-0 right-0 top-0"
-                style={{ height: ROW_H - 2, transform: `translateY(${vRow.start}px)` }}
-              >
-              <div
-                className={clsx(
-                  // 行本身不带 hover 背景 —— 悬停高亮由列表外壳上的 .music-hl
-                  // 高亮块负责（CSS :hover 在滚动时不刷新，会粘在旧行上）
-                  'music-row group flex items-center gap-3 px-4 h-full rounded-xl border border-transparent cursor-pointer',
-                  introRow && 'music-row-enter',
-                  dragEnabled && 'touch-none select-none', // 拖拽时防原生拖拽/选字；光标保持 pointer（点击=播放）
-                  drag?.active && drag.id === trk.id && 'cursor-grabbing', // 正在拖动的行显示抓握
-                  idx === listFocused && 'gamepad-focus',
-                  drag?.active && drag.id === trk.id && 'drag-src',
-                  trk.id === playingTrackId && 'music-row-playing', // 当前播放行：底色 + 左侧竖条
-                )}
+                key={vRow.key}
+                className="absolute left-0 right-0 top-0 grid"
                 style={{
-                  // 用绝对行号而非批内序号：批内序号会随虚拟窗口滑动改写，
-                  // 改写运行中动画的 delay 会把它拽回起始相位 → 整行重闪。
-                  // 不设上限：封顶会把后半段行压到同一时刻开始动画，看起来
-                  // 「后半段瞬间一起出现」；范围已由 idx < introRows 收在首屏内
-                  animationDelay: introRow ? `${idx * 30}ms` : undefined,
+                  height: rowH - 2,
+                  transform: `translateY(${vRow.start}px)`,
+                  gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                  columnGap: COL_GAP,
                 }}
-                onClick={() => {
-                  if (multiSelect) toggleSelect(trk.id);
-                  else handlePlay(trk);
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (multiSelect) setBulkMenu({ x: e.clientX, y: e.clientY });
-                  else setMenu({ t: trk, x: e.clientX, y: e.clientY });
-                }}
-                onPointerDown={dragEnabled ? (e) => handleRowPointerDown(e, trk) : undefined}
               >
-                {/* 多选复选框 */}
-                {multiSelect && (
-                  <span className="w-5 shrink-0 flex items-center justify-center">
-                    {selected.has(trk.id)
-                      ? <CheckSquare size={16} className="text-[#00d4ff]" />
-                      : <Square size={16} className="text-text-tertiary" />}
-                  </span>
-                )}
-
-                {/* 封面 / 默认图标 */}
-                <div className="relative w-11 h-11 rounded-lg overflow-hidden shrink-0 bg-bg-surface border border-border-glass flex items-center justify-center">
-                  {trk.cover_path ? (
-                    // 行挂载时就在视口内（虚拟滚动 overscan 保证），lazy 只延迟解码调度
-                    // —— 快速滚动停下时全视口同时补解码。eager 挂载即解码；CoverImg
-                    // 提供内存缓存层（滚动回来零协议往返出图）
-                    <CoverImg src={coverSrc(trk.cover_path, trk.updated_at)} alt="" loading="eager" decoding="async" className="w-full h-full object-cover" draggable={false} />
-                  ) : (
-                    <Music2 size={20} className="text-text-tertiary" />
-                  )}
-                  {/* 正在播放：封面上盖三根跳动的均衡器竖条。暂停时条不动（animation-play-state），
-                      一眼能分清「这首在放」和「这首停在这儿」 */}
-                  {trk.id === playingTrackId && (
-                    <span className={clsx('eq-badge', !musicPlaying && 'paused')} aria-hidden>
-                      <i /><i /><i />
-                    </span>
-                  )}
-                </div>
-
-                {/* 歌名 / 歌手 / 专辑艺术家 */}
-                <div className="flex-1 min-w-0">
-                  <p className={clsx(
-                    'truncate text-base font-medium',
-                    trk.id === playingTrackId ? 'text-accent' : 'text-text-primary',
-                  )}>{trk.title}</p>
-                  <p className="truncate text-sm text-text-secondary">
-                    {(trk.artist || t('music.unknownArtist'))}
-                    {trk.album_artist && trk.album_artist !== trk.artist ? ` · ${trk.album_artist}` : ''}
-                  </p>
-                </div>
-
-                {/* 专辑 */}
-                <span className="hidden md:block w-72 truncate text-xs text-text-secondary">{trk.album || t('music.unknownAlbum')}</span>
-
-                {/* 比特率 */}
-                <span className="hidden xl:block w-20 shrink-0 text-right text-[11px] text-text-tertiary tabular-nums">
-                  {trk.bitrate > 0 ? `${trk.bitrate} kbps` : ''}
-                </span>
-
-                {/* 时长 */}
-                <span className="w-14 text-right text-xs text-text-tertiary tabular-nums">{fmtTime(trk.duration_seconds)}</span>
-
-                {/* 操作：收藏 + 播放 */}
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); void toggleTrackFavorite(trk.id); }}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-text-tertiary hover:text-yellow-400 hover:bg-bg-surface-active transition-all"
-                    title={trk.favorite ? t('music.unfavorite') : t('music.favorite')}
+                {rowTracks.map((trk, colIdx) => {
+                  const idx = rowStart + colIdx;
+                  // 以绝对行列取节奏，虚拟窗口移动时不会改写同一首曲目的延迟。
+                  const introCell = !everDragged && !introDone && idx < introCells;
+                  const intro = musicIntro(vRow.index, colIdx, multi);
+                  return (
+                  <div
+                    key={trk.id}
+                    className={clsx(
+                      // 行本身不带 hover 背景 —— 悬停高亮由列表外壳上的 .music-hl
+                      // 高亮块负责（CSS :hover 在滚动时不刷新，会粘在旧行上）
+                      'music-row group flex items-center h-full rounded-xl border border-transparent cursor-pointer',
+                      multi ? 'gap-2.5 px-3' : 'gap-3 px-4',
+                      introCell && 'music-row-enter',
+                      dragEnabled && 'touch-none select-none', // 拖拽时防原生拖拽/选字；光标保持 pointer（点击=播放）
+                      drag?.active && drag.id === trk.id && 'cursor-grabbing', // 正在拖动的行显示抓握
+                      idx === listFocused && 'gamepad-focus',
+                      drag?.active && drag.id === trk.id && 'drag-src',
+                      trk.id === playingTrackId && 'music-row-playing', // 当前播放行：底色 + 左侧竖条
+                    )}
+                    style={introCell ? {
+                      animationDelay: `${intro.delay}ms`,
+                      animationDuration: `${intro.duration}ms`,
+                      '--music-enter-x': `${intro.x}px`,
+                      '--music-enter-y': `${intro.y}px`,
+                    } as CSSProperties : undefined}
+                    onClick={() => {
+                      if (multiSelect) toggleSelect(trk.id);
+                      else handlePlay(trk);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (multiSelect) setBulkMenu({ x: e.clientX, y: e.clientY });
+                      else setMenu({ t: trk, x: e.clientX, y: e.clientY });
+                    }}
+                    onPointerDown={dragEnabled ? (e) => handleRowPointerDown(e, trk) : undefined}
                   >
-                    <Star
-                      size={15}
-                      className={trk.favorite ? 'text-yellow-400' : ''}
-                      fill={trk.favorite ? 'currentColor' : 'none'}
-                    />
-                  </button>
-                </div>
-              </div>
+                    {/* 多选复选框 */}
+                    {multiSelect && (
+                      <span className="w-5 shrink-0 flex items-center justify-center">
+                        {selected.has(trk.id)
+                          ? <CheckSquare size={16} className="text-[#00d4ff]" />
+                          : <Square size={16} className="text-text-tertiary" />}
+                      </span>
+                    )}
+
+                    {/* 封面 / 默认图标 */}
+                    <div className={clsx(
+                      'relative rounded-lg overflow-hidden shrink-0 bg-bg-surface border border-border-glass flex items-center justify-center',
+                      multi ? 'w-10 h-10' : 'w-11 h-11',
+                    )}>
+                      {trk.cover_path ? (
+                        // 行挂载时就在视口内（虚拟滚动 overscan 保证），lazy 只延迟解码调度
+                        // —— 快速滚动停下时全视口同时补解码。eager 挂载即解码；CoverImg
+                        // 提供内存缓存层（滚动回来零协议往返出图）
+                        <CoverImg src={coverSrc(trk.cover_path, trk.updated_at)} alt="" loading="eager" decoding="async" className="w-full h-full object-cover" draggable={false} />
+                      ) : (
+                        <Music2 size={multi ? 18 : 20} className="text-text-tertiary" />
+                      )}
+                      {/* 正在播放：封面上盖三根跳动的均衡器竖条。暂停时条不动（animation-play-state），
+                          一眼能分清「这首在放」和「这首停在这儿」 */}
+                      {trk.id === playingTrackId && (
+                        <span className={clsx('eq-badge', !musicPlaying && 'paused')} aria-hidden>
+                          <i /><i /><i />
+                        </span>
+                      )}
+                    </div>
+
+                    {/* 歌名 / 歌手 / 专辑艺术家 */}
+                    <div className="flex-1 min-w-0">
+                      <p className={clsx(
+                        'truncate font-medium',
+                        multi ? 'text-sm' : 'text-base',
+                        trk.id === playingTrackId ? 'text-accent' : 'text-text-primary',
+                      )}>{trk.title}</p>
+                      <p className={clsx('truncate text-text-secondary', multi ? 'text-xs' : 'text-sm')}>
+                        {(trk.artist || t('music.unknownArtist'))}
+                        {trk.album_artist && trk.album_artist !== trk.artist ? ` · ${trk.album_artist}` : ''}
+                      </p>
+                    </div>
+
+                    {/* 专辑 / 比特率：多列下一列才 600 来宽，这两列挤掉的是曲名和歌手，只在单列显示 */}
+                    {!multi && (
+                      <span className="hidden md:block w-72 truncate text-xs text-text-secondary">{trk.album || t('music.unknownAlbum')}</span>
+                    )}
+                    {!multi && (
+                      <span className="hidden xl:block w-20 shrink-0 text-right text-[11px] text-text-tertiary tabular-nums">
+                        {trk.bitrate > 0 ? `${trk.bitrate} kbps` : ''}
+                      </span>
+                    )}
+
+                    {/* 时长 */}
+                    <span className={clsx(
+                      'text-right text-xs text-text-tertiary tabular-nums',
+                      multi ? 'w-12 shrink-0' : 'w-14',
+                    )}>{fmtTime(trk.duration_seconds)}</span>
+
+                    {/* 操作：收藏 */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); void toggleTrackFavorite(trk.id); }}
+                        className={clsx(
+                          'rounded-lg flex items-center justify-center text-text-tertiary hover:text-yellow-400 hover:bg-bg-surface-active transition-all',
+                          multi ? 'w-7 h-7' : 'w-8 h-8',
+                        )}
+                        title={trk.favorite ? t('music.unfavorite') : t('music.favorite')}
+                      >
+                        <Star
+                          size={multi ? 14 : 15}
+                          className={trk.favorite ? 'text-yellow-400' : ''}
+                          fill={trk.favorite ? 'currentColor' : 'none'}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                  );
+                })}
               </div>
               );
             })}
@@ -719,8 +868,10 @@ export default function MusicView() {
                   <p className="truncate text-base font-medium text-text-primary">{src.title}</p>
                   <p className="truncate text-sm text-text-secondary">{src.artist || t('music.unknownArtist')}</p>
                 </div>
-                {/* 与原行同宽的专辑列，克隆视觉对齐完整一行 */}
-                <span className="hidden md:block w-72 shrink-0 truncate text-xs text-text-secondary">{src.album || t('music.unknownAlbum')}</span>
+                {/* 与原行同宽的专辑列，克隆视觉对齐完整一行（多列下行里也没有这列） */}
+                {!multi && (
+                  <span className="hidden md:block w-72 shrink-0 truncate text-xs text-text-secondary">{src.album || t('music.unknownAlbum')}</span>
+                )}
                 <span className="w-14 shrink-0 text-right text-xs text-text-tertiary tabular-nums">{fmtTime(src.duration_seconds)}</span>
               </div>
             );

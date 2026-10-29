@@ -65,19 +65,81 @@ function release(entry: CacheEntry | null) {
   if (entry) entry.refs = Math.max(0, entry.refs - 1);
 }
 
-async function loadToCache(url: string): Promise<string | null> {
-  try {
-    const resp = await fetch(url);
-    if (!resp.ok) return null;
-    const blob = await resp.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    evict();
-    cache.set(url, { url: objectUrl, bytes: blob.size, refs: 0 });
-    totalBytes += blob.size;
-    return objectUrl;
-  } catch {
-    return null; // 调用方兜底原 URL 直连
+// ── 加载闸：并发上限 + LIFO 队列 + 在途去重 ──
+// 快速往下滑时，滚过的每一行都会 fetch 一张封面。浏览器对同源只开 ~6 条并发连接，
+// 其余在它内部按 FIFO 排队 —— 最先滚过（早已不可见）的排在前头，当前真正可见的
+// 那十几张反而垫底，于是「停下后封面半天刷不出来」。这里把队列抢在浏览器前面自己托管：
+//   - 只向浏览器喂 MAX_CONCURRENT 条（≤ 浏览器同源上限，它内部就不再二次排队），
+//     其余压在 LIFO 栈里（最后入队 = 刚挂载 = 最可能可见，先取）
+//   - 在途去重：同一 URL 只飞一发，滚回来 / 多列重复请求都挂到同一个 promise
+//   - 出队时没有活着的等待者 → 直接丢弃（滚过去还没起飞的不占槽）
+// 已起飞的即便组件已卸载也让它跑完、写入缓存（滚回来同步命中，零往返）
+const MAX_CONCURRENT = 6;
+let active = 0;
+interface Load {
+  url: string;
+  promise: Promise<string | null>;
+  resolve: (v: string | null) => void;
+  waiters: number;  // 还活着的等待组件数；出队时为 0 → 丢弃
+  started: boolean; // 已占槽起飞；起飞后不再丢弃（让它写缓存）
+}
+const byUrl = new Map<string, Load>();
+const waitStack: Load[] = []; // 仅未起飞的，栈顶 = 最新请求
+
+function pump() {
+  while (active < MAX_CONCURRENT && waitStack.length > 0) {
+    const item = waitStack.pop()!;
+    // 栈顶那项的等待者已全部卸载（滚过去了）→ 不占槽，丢弃
+    if (item.waiters <= 0) { byUrl.delete(item.url); item.resolve(null); continue; }
+    item.started = true;
+    active += 1;
+    void runFetch(item);
   }
+}
+
+async function runFetch(item: Load) {
+  let result: string | null = null;
+  try {
+    const resp = await fetch(item.url);
+    if (resp.ok) {
+      const blob = await resp.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      evict();
+      cache.set(item.url, { url: objectUrl, bytes: blob.size, refs: 0 });
+      totalBytes += blob.size;
+      result = objectUrl;
+    }
+  } catch {
+    result = null; // 调用方兜底原 URL 直连
+  } finally {
+    active -= 1;
+    byUrl.delete(item.url);
+    item.resolve(result);
+    pump(); // 腾出的槽立刻喂下一张（栈顶 = 最新 = 最可能可见）
+  }
+}
+
+// 请求加载一张封面。同一 URL 的多个请求共享同一发 fetch。
+// release：组件卸载时调用，等待者减一（未起飞且归零的会在出队时被丢弃）。
+function requestLoad(url: string): { promise: Promise<string | null>; release: () => void } {
+  let item = byUrl.get(url);
+  if (!item) {
+    let resolve!: (v: string | null) => void;
+    const promise = new Promise<string | null>((r) => { resolve = r; });
+    item = { url, promise, resolve, waiters: 0, started: false };
+    byUrl.set(url, item);
+    waitStack.push(item);
+    pump();
+  } else if (!item.started) {
+    // 已排队未起飞：提到栈顶（又被请求一次 = 更可能可见）
+    const i = waitStack.indexOf(item);
+    if (i >= 0) { waitStack.splice(i, 1); waitStack.push(item); }
+  }
+  item.waiters += 1;
+  const target = item;
+  let released = false;
+  const release = () => { if (!released) { released = true; target.waiters -= 1; } };
+  return { promise: target.promise, release };
 }
 
 interface Props extends React.ImgHTMLAttributes<HTMLImageElement> {
@@ -95,7 +157,7 @@ export default function CoverImg({ src, ...rest }: Props) {
   // fetch 失败才切原 URL 兜底（正常路径永远不出现）
   const [fallback, setFallback] = useState(false);
 
-  // 本次挂载期间把条目钉住，不许被淘汰。held 由 effect 与 fetch 回调共享：
+  // 本次挂载期间把条目钉住，不许被淘汰。held 由 effect 与加载回调共享：
   // 卸载/换 src 先发生时 cancelled 已置位，回调不会再去钉，held 保持 null → 无需 release
   useEffect(() => {
     if (!src) return;
@@ -107,17 +169,18 @@ export default function CoverImg({ src, ...rest }: Props) {
     }
     setFallback(false);
     let cancelled = false;
-    loadToCache(src).then((url) => {
+    // 走加载闸：并发受限、LIFO 优先当前可见、同 URL 去重（见上方 requestLoad）
+    const { promise, release: releaseLoad } = requestLoad(src);
+    promise.then((url) => {
       if (cancelled) return; // 已卸载：缓存照常写入，下次挂载同步命中
-      // 只有本挂载周期仍活着才钉住 —— cancelled 后的回调再 retain 会永久泄漏
-      // （release 对不上号）
-      held = retain(src);
-      if (url) setCached(url);
+      // 只有本挂载周期仍活着才钉住 —— cancelled 后再 retain 会永久泄漏（release 对不上号）
+      if (url) { held = retain(src); setCached(url); }
       else setFallback(true);
     });
     return () => {
       cancelled = true;
-      release(held);
+      releaseLoad(); // 加载队列登记减一（未起飞且无人等待则出队丢弃）
+      release(held); // LRU 挂载计数减一（held 可能仍为 null）
     };
   }, [src]);
 

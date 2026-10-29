@@ -152,7 +152,9 @@ export default function GameCard({ game, onClick, onLaunch, onContextMenu, onPoi
             <div className="game-card-launch">
               <button
                 onClick={onLaunch}
-                className="btn btn-accent gap-2 py-3 px-6 text-sm"
+                disabled={!!game.archive_status}
+                title={game.archive_status ? t('games.archiveCannotLaunch') : undefined}
+                className="btn btn-accent gap-2 py-3 px-6 text-sm disabled:opacity-50"
               >
                 <Play size={16} fill="currentColor" />
                 {t('games.launch')}
@@ -162,6 +164,11 @@ export default function GameCard({ game, onClick, onLaunch, onContextMenu, onPoi
 
           {/* Top badges */}
           <div className="absolute top-3 left-3 flex gap-1.5 z-10">
+            {game.archive_status && (
+              <span className="px-2 py-1 rounded-lg bg-black/70 text-xs text-amber-400" title={t('games.archiveCannotLaunch')}>
+                {t(game.archive_status === 'cleanup_pending' ? 'games.archiveLeftover' : 'games.archived')}
+              </span>
+            )}
             {game.hidden && (
               <span className="w-7 h-7 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-text-secondary">
                 <EyeOff size={13} />

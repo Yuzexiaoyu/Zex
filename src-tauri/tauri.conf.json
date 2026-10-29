@@ -44,6 +44,7 @@
       "icons/icon.ico"
     ],
     "windows": {
+      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File D:\\ZEX\\scripts\\补签.ps1 -Exe %1",
       "nsis": {
         "installMode": "currentUser"
       }

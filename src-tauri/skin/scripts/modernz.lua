@@ -107,7 +107,7 @@ local user_opts = {
     info_button = true,                    -- show info button
     ontop_button = true,                   -- show window on top button
     ontop_in_topbar = false,               -- move ontop button to top bar when ontop is active
-    screenshot_button = true,              -- show screenshot button
+    screenshot_button = false,             -- show screenshot button
 
     download_button = true,                -- show download button on web videos (requires yt-dlp and ffmpeg)
     download_path = "~~desktop/mpv",       -- default download directory for videos (https://mpv.io/manual/master/#paths)
@@ -620,6 +620,7 @@ local state = {
     drawer_osd = mp.create_osd_overlay("ass-events"),  -- 抽屉独立 overlay：滚动/动画只重绘它，不拖累整条 OSC
     logo_osd = mp.create_osd_overlay("ass-events"),
     speed_overlay = mp.create_osd_overlay("ass-events"),
+    subs_overlay = mp.create_osd_overlay("ass-events"),   -- ZEX：字幕轨悬停面板（与倍速面板互斥）
     keeponpause_active = false,             -- keeponpause bottombar active state
     duration = nil,                         -- current file duration
     chapter_list = {},                      -- sorted by time
@@ -684,6 +685,16 @@ local state = {
     -- 把第二次点击当成面板逻辑处理，到期后恢复
     speed_panel_guard = nil,            -- 未过期时刻（mp.get_time），nil=不生效
     speed_panel_guard_timer = nil,      -- 到期自动恢复的 timer
+    -- ZEX：字幕轨悬停面板（与倍速面板同一套交互，实现见 subs_panel 全局表）
+    subs_panel_open = false,            -- 面板是否显示
+    subs_panel_hover = nil,             -- 悬停行索引
+    subs_panel_timer = nil,             -- 延迟关闭 timer
+    subs_panel_suppress = false,        -- 手动收起后抑制悬停自动重开
+    subs_panel_guard = nil,             -- 选完轨后的缓冲窗口（防第二次点击漏成暂停）
+    subs_panel_guard_timer = nil,
+    subs_panel_items = nil,             -- 打开时快照的字幕轨列表
+    subs_panel_w = nil,                 -- 按最长轨名算出的面板宽（虚拟坐标）
+    subs_element = nil,                 -- osc_init 缓存的 sub_track 按钮引用
     -- ZEX：进度条预览图 hover 延迟 —— 鼠标悬停稳定一段时间后才请求缩略图，
     -- 移开即取消；拖拽（force_seek_tooltip）不受延迟影响，立即显示
     seek_thumb_ready = false,           -- 延迟到期置 true，此时才允许绘制预览图
@@ -691,6 +702,7 @@ local state = {
 }
 
 state.speed_overlay.z = 2100 -- 盖在主 OSD（1000）与音量提示（2000）之上
+state.subs_overlay.z = 2100  -- 同层：两个悬停面板互斥，不会同时绘制
 
 local logo_lines = {
     -- White border
@@ -1730,7 +1742,7 @@ local function render_elements(master_ass, osc_vis, wc_vis)
                     -- ZEX：预览图 hover 延迟 —— 悬停稳定 0.4s 后才显示缩略图，
                     -- 期间只启动 timer；鼠标移开由下方 elseif 分支取消。
                     -- 拖拽（force_seek_tooltip）是明确交互，不受延迟限制，立即显示
-                    local seek_hover = mouse_hit(element) and not (state.speed_panel_open and speed_panel_mouse_over())
+                    local seek_hover = mouse_hit(element) and not (hover_panel_open() and hover_panel_mouse_over())
                     if seek_hover and not force_seek_tooltip and element.thumbnailable
                         and not state.seek_thumb_ready and state.seek_thumb_timer == nil then
                         state.seek_thumb_timer = mp.add_timeout(0.4, function()
@@ -1886,7 +1898,8 @@ local function render_elements(master_ass, osc_vis, wc_vis)
             local seeking_with_force_tooltip = user_opts.force_seek_tooltip and state.mouse_down_counter > 0 and state.playing_and_seeking
 
             if element.tooltipF ~= nil and element.enabled and not seeking_with_force_tooltip and user_opts.tooltip_hints
-                and not (element.name == "speed" and state.speed_panel_open) then
+                and not ((element.name == "speed" and state.speed_panel_open)
+                    or (element.name == "sub_track" and state.subs_panel_open)) then
                 local hb = element.hover_box
                 if (hb and mouse_hit_coords(hb.x1, hb.y1, hb.x2, hb.y2) or mouse_hit(element)) then
                     local tooltiplabel
@@ -2357,7 +2370,9 @@ layouts["default"] = function ()
     end
 
     if audio_track and user_opts.audio_tracks_button then left_side_button("audio_track", 650) end
-    if subtitle_track and user_opts.subtitles_button then left_side_button("sub_track", 750) end
+    -- ZEX：字幕按钮挪到右侧（原截图按钮那一格），见下方 right_side_button("sub_track")。
+    -- 同时去掉「片源有字幕轨才出现」的条件 —— 按钮忽隐忽现会让人以为没这个功能；
+    -- 无字幕轨时保持 ModernZ 语义：elements.sub_track.enabled=false 自动灰显、悬停提示「无字幕」
 
     if audio_track and user_opts.volume_control then
         -- volume button
@@ -2479,6 +2494,9 @@ layouts["default"] = function ()
     right_side_button("info", 650, user_opts.info_button)
     right_side_button("ontop", 750, user_opts.ontop_button and not (window_controls_enabled() and user_opts.ontop_in_topbar and state.ontop))
     right_side_button("screenshot", 850, user_opts.screenshot_button)
+    -- ZEX：字幕选择。占原截图按钮这一格（screenshot_button=no 后 screenshot 不占位）。
+    -- 不带 sub_track_count 条件 → 常显，位置不随片源字幕轨有无跳动
+    right_side_button("sub_track", 850, user_opts.subtitles_button)
     right_side_button("file_loop", 950, user_opts.loop_button)
     right_side_button("shuffle", 1050, user_opts.shuffle_button)
     right_side_button("speed", 1150, user_opts.speed_button, osc_styles.speed, 42)
@@ -3715,7 +3733,8 @@ playlist_drawer_set_keys = function(on)
             playlist_drawer_dpad_event(-1), {complex = true})
         mp.add_forced_key_binding("GAMEPAD_DPAD_DOWN", "zex_drawer_dpad_down",
             playlist_drawer_dpad_event(1), {complex = true})
-        mp.enable_key_bindings("playlist_drawer_keys")
+        -- 键盘/手柄节默认也有整屏鼠标区域，必须放行光标隐藏。
+        mp.enable_key_bindings("playlist_drawer_keys", "allow-hide-cursor+allow-vo-dragging")
     else
         mp.remove_key_binding("zex_drawer_dpad_up")
         mp.remove_key_binding("zex_drawer_dpad_down")
@@ -4108,6 +4127,275 @@ local function draw_speed_panel()
     -- 悬停高亮下一帧生效：收起动画期间不再更新（此时不接鼠标）
     state.speed_panel_hover = state.speed_panel_closing and nil or speed_panel_hit_index()
 end
+--
+-- 字幕轨悬停面板（ZEX）
+-- 和倍速面板同一套交互：悬停 sub_track 按钮向上弹出字幕轨列表，点击切换 sid。
+-- 独立 OSD overlay 渲染到显示器物理像素，不受 osd-scale 缩放；几何/命中用 playres
+-- 虚拟坐标。常量与方法全挂在这一个全局表上 —— 本文件顶层 local 已接近 Lua 200 上限，
+-- 不能再新增顶层 local，状态一律进 state 表。
+-- 绘制/测量工具直接复用倍速面板与抽屉那几个（speed_panel_fill / speed_panel_scale /
+-- playlist_drawer_text / playlist_drawer_truncate），它们都定义在本段之前。
+--
+subs_panel = {
+    row_h = 26,
+    pad = 6,
+    fs = 15,
+    gap = 6,
+    close_delay = 0.25,
+    min_w = 120,
+    max_w = 360,
+}
+
+-- 宽度测量用的行样式（虚拟坐标字号；绘制时字号另乘屏幕缩放因子）
+function subs_panel.row_style()
+    return string.format("{\\fs%d\\fn%s\\bord0\\shad0}", subs_panel.fs, user_opts.font)
+end
+
+-- 字幕轨快照。末项固定「无字幕」= 关掉字幕：面板自下往上离按钮最近，关字幕最常用
+function subs_panel.build_items()
+    local items = {}
+    for _, t in ipairs(mp.get_property_native("track-list") or {}) do
+        if t.type == "sub" then
+            local label = t.title
+            if not label or label == "" then label = t.lang end
+            if not label or label == "" then label = locale.subtitle .. " " .. tostring(t.id) end
+            items[#items + 1] = {sid = t.id, label = label}
+        end
+    end
+    items[#items + 1] = {sid = false, label = locale.no_subs}
+    return items
+end
+
+-- 面板宽 = 最长轨名 + 左右呼吸，夹在 [min_w, max_w]（超出的轨名绘制时截断加省略号）
+function subs_panel.width()
+    local style = subs_panel.row_style()
+    local w = 0
+    for _, it in ipairs(state.subs_panel_items or {}) do
+        local tw = playlist_drawer_estimate_text_width(it.label, style)
+        if tw > w then w = tw end
+    end
+    w = w + subs_panel.pad * 4
+    if w < subs_panel.min_w then w = subs_panel.min_w end
+    if w > subs_panel.max_w then w = subs_panel.max_w end
+    return w
+end
+
+function subs_panel.rect()
+    local e = state.subs_element
+    if not (e and e.hitbox) then return 0, 0, 0, 0 end
+    local n = #(state.subs_panel_items or {})
+    if n == 0 then return 0, 0, 0, 0 end
+    local hb = e.hitbox
+    local w = state.subs_panel_w or subs_panel.min_w
+    local cx = (hb.x1 + hb.x2) / 2
+    local x1, x2 = cx - w / 2, cx + w / 2
+    -- 面板比按钮宽得多（倍速面板宽 68 没这问题）：贴屏幕右/左缘时整体平移回屏内
+    if x2 > osc_param.playresx - 8 then
+        local d = x2 - (osc_param.playresx - 8)
+        x1, x2 = x1 - d, x2 - d
+    end
+    if x1 < 8 then
+        local d = 8 - x1
+        x1, x2 = x1 + d, x2 + d
+    end
+    local y2 = hb.y1 - subs_panel.gap
+    local y1 = y2 - (n * subs_panel.row_h + subs_panel.pad * 2)
+    return x1, y1, x2, y2
+end
+
+function subs_panel.active()
+    return state.subs_panel_open == true
+end
+
+-- 鼠标在按钮 hitbox ∪ 面板矩形（含 gap 容差，光标从面板移回按钮要穿过一条真空带）
+function subs_panel.mouse_over()
+    local e = state.subs_element
+    if e and e.hitbox and e.visible ~= false then
+        local hb = e.hitbox
+        if mouse_hit_coords(hb.x1, hb.y1, hb.x2, hb.y2) then return true end
+    end
+    if not subs_panel.active() then return false end
+    local x1, y1, x2, y2 = subs_panel.rect()
+    return mouse_hit_coords(x1, y1, x2 + 2, y2 + subs_panel.gap + 4)
+end
+
+-- 命中行索引（严格矩形：gap 容差只用于「保持展开」，不该点出行）
+function subs_panel.hit_index()
+    if not subs_panel.active() then return nil end
+    local x1, y1, x2, y2 = subs_panel.rect()
+    if not mouse_hit_coords(x1, y1, x2, y2) then return nil end
+    local _, my = get_virt_mouse_pos()
+    local idx = math.floor((my - (y1 + subs_panel.pad)) / subs_panel.row_h) + 1
+    if idx < 1 or idx > #(state.subs_panel_items or {}) then return nil end
+    return idx
+end
+
+function subs_panel.kill_timer()
+    if state.subs_panel_timer then
+        state.subs_panel_timer:kill()
+        state.subs_panel_timer = nil
+    end
+end
+
+-- 彻底关闭：清 overlay + 复位状态。items 故意保留 —— guard 缓冲窗口里还要靠它算行
+function subs_panel.finish_close()
+    subs_panel.kill_timer()
+    state.subs_panel_open = false
+    state.subs_panel_hover = nil
+    state.subs_panel_suppress = false
+    if state.subs_overlay.data ~= "" then
+        state.subs_overlay.data = ""
+        state.subs_overlay:update()
+    end
+end
+
+function subs_panel.show()
+    subs_panel.kill_timer()
+    state.subs_panel_guard = nil
+    if state.subs_panel_guard_timer then
+        state.subs_panel_guard_timer:kill()
+        state.subs_panel_guard_timer = nil
+    end
+    if subs_panel.active() then return end
+    -- 两个悬停面板互斥：开字幕面板前先收掉倍速面板
+    if state.speed_panel_open then speed_panel_close(true) end
+    state.subs_panel_items = subs_panel.build_items()
+    state.subs_panel_w = subs_panel.width()
+    state.subs_panel_open = true
+    state.subs_panel_hover = nil
+    speed_panel_expand_showhide()   -- 同款：面板在底部 deadzone 带之外，showhide 要扩全屏
+    request_tick()
+end
+
+function subs_panel.close(force)
+    subs_panel.kill_timer()
+    if not subs_panel.active() then return end
+    if not force and subs_panel.mouse_over() then return end
+    subs_panel.finish_close()
+    request_init()
+end
+
+function subs_panel.close_delayed()
+    if not subs_panel.active() then return end
+    if state.subs_panel_timer then return end
+    state.subs_panel_timer = mp.add_timeout(subs_panel.close_delay, function()
+        state.subs_panel_timer = nil
+        subs_panel.close(false)
+    end)
+end
+
+function subs_panel.toggle()
+    if subs_panel.active() then
+        state.subs_panel_suppress = true
+        subs_panel.close(true)
+    else
+        state.subs_panel_suppress = false
+        subs_panel.show()
+    end
+end
+
+-- 选定字幕轨：切 sid + 左上角提示（同循环/音量那套 volume_osd notify）+ 强制收起
+function subs_panel.pick(idx)
+    local it = (state.subs_panel_items or {})[idx]
+    if not it then return end
+    mp.commandv("no-osd", "set", "sid", it.sid == false and "no" or tostring(it.sid))
+    mp.commandv("script-message-to", "volume_osd", "notify", locale.subtitle .. "：" .. it.label)
+    state.subs_panel_suppress = true
+    subs_panel.close(true)
+    -- guard 缓冲窗口，同倍速面板：收起后 input 捕获区仍全屏，紧接着的第二次点击
+    -- （快速连选两轨）不能漏成 input.conf 的 MBTN_LEFT cycle pause。0.5s 覆盖双击判定
+    state.subs_panel_guard = mp.get_time() + 0.5
+    if state.subs_panel_guard_timer then state.subs_panel_guard_timer:kill() end
+    state.subs_panel_guard_timer = mp.add_timeout(0.5, function()
+        state.subs_panel_guard = nil
+        state.subs_panel_guard_timer = nil
+        request_init()
+    end)
+end
+
+-- 每次 mouse_move 调用：在按钮/面板内保持或打开，移出则启动延迟关闭
+function subs_panel.auto()
+    if subs_panel.mouse_over() then
+        if not state.subs_panel_suppress then subs_panel.show() end
+        return true
+    end
+    state.subs_panel_suppress = false
+    subs_panel.close_delayed()
+    return false
+end
+
+function subs_panel.draw()
+    local e = state.subs_element
+    if not (e and e.hitbox) then
+        -- 锚点按钮被布局移除（窗口变窄、布局切换）：清掉残留 overlay
+        subs_panel.finish_close()
+        return
+    end
+    local items = state.subs_panel_items or {}
+    if #items == 0 then return end
+    local x1, y1, x2, y2 = subs_panel.rect()
+    if x2 <= x1 then return end
+    local fx, fy = speed_panel_scale()
+    local rx1, ry1, rx2, ry2 = x1 * fx, y1 * fy, x2 * fx, y2 * fy
+    local rfs = subs_panel.fs * fy
+    local rrow = subs_panel.row_h * fy
+    local rpad = subs_panel.pad * fy
+
+    local a = assdraw.ass_new()
+    local accent = osc_color_convert(user_opts.seekbarfg_color)
+    speed_panel_fill(a, rx1, ry1, rx2, ry2, "0E0E12", 0x12, 6 * fy)
+
+    local cur = mp.get_property_native("sid")       -- 轨号 / false（无字幕）
+    local measure_style = subs_panel.row_style()
+    local text_max_w = (x2 - x1) - subs_panel.pad * 4
+    local inner_y = ry1 + rpad
+    for i, it in ipairs(items) do
+        local row_y1 = inner_y + (i - 1) * rrow
+        local row_y2 = row_y1 + rrow
+        local is_cur
+        if it.sid == false then
+            is_cur = (cur == false or cur == nil)
+        else
+            is_cur = (cur == it.sid)
+        end
+        local is_hover = state.subs_panel_hover == i
+        if is_hover or is_cur then
+            speed_panel_fill(a, rx1 + 4 * fx, row_y1 + 1 * fy, rx2 - 4 * fx, row_y2 - 1 * fy,
+                is_cur and accent or "FFFFFF", is_cur and 0x9A or 0x0F, 4 * fy)
+        end
+        local color = is_cur and "&HFFFFFF&"
+            or (is_hover and ("&H" .. accent .. "&") or "&HAAAAAA&")
+        local style = string.format("{\\fs%d\\fn%s\\bord0\\shad0\\1c%s}",
+            rfs, user_opts.font, color)
+        -- 左对齐（an=4）：轨名长短不一，居中会让每行起点跳动
+        playlist_drawer_text(a, rx1 + subs_panel.pad * 2 * fx, (row_y1 + row_y2) / 2, 4, style,
+            playlist_drawer_truncate(it.label, text_max_w, measure_style))
+    end
+
+    local od = state.osd_dimensions
+    state.subs_overlay.res_x = od and od.w or 1920
+    state.subs_overlay.res_y = od and od.h or 1080
+    state.subs_overlay.data = a.text
+    state.subs_overlay:update()
+
+    state.subs_panel_hover = subs_panel.hit_index()
+end
+
+-- ZEX：两个悬停面板（倍速 / 字幕）的统一判定。各处 showhide 区、input 捕获区、
+-- 自动收栏、点击兜底的条件都走这三个，避免每加一个面板就漏改一处
+function hover_panel_open()
+    return state.speed_panel_open or state.subs_panel_open
+end
+
+function hover_panel_guard()
+    local t = mp.get_time()
+    return (state.speed_panel_guard ~= nil and t < state.speed_panel_guard)
+        or (state.subs_panel_guard ~= nil and t < state.subs_panel_guard)
+end
+
+function hover_panel_mouse_over()
+    return speed_panel_mouse_over() or subs_panel.mouse_over()
+end
 
 -- 绘制抽屉（在 render_element 的 drawer 分支被调用）
 -- 注意：不能写成 local function —— 顶部已前向声明，这里赋值给同名局部
@@ -4375,6 +4663,7 @@ local function osc_init()
     -- 否则残留的 overlay 会停在上一次的位置。这里不再 request_init，
     -- 我们本来就在初始化流程里
     speed_panel_finish_close()
+    subs_panel.finish_close()
 
     -- set canvas resolution according to display aspect and scaling setting
     local baseResY = 720
@@ -4597,6 +4886,8 @@ local function osc_init()
     ne.tooltipF = function () return track_tooltip(locale.subtitle, "sub", "sid", state.sub_track_count) end
     ne.nothingavailable = locale.no_subs
     bind_buttons("sub_track")
+    -- ZEX：字幕改为悬停弹出轨道面板，左键 = 开/关面板（右键/中键/滚轮命令已全 ignore）
+    ne.eventresponder["mbtn_left_up"] = subs_panel.toggle
 
     -- vol_ctrl
     ne = new_element("vol_ctrl", "button")
@@ -4992,8 +5283,7 @@ local function osc_init()
     -- 上面 add_area 已把 showhide 重算回底部栏那条 deadzone 带，而鼠标还停在原
     -- 面板位置（deadzone 之外）→ 会立刻触发 mouse_leave → deadzone_hide=instant
     -- → hide_osc() 清空 input 捕获区 → guard 的全屏捕获被拆掉。必须整屏替换
-    if state.speed_panel_open or
-        (state.speed_panel_guard and mp.get_time() < state.speed_panel_guard) then
+    if hover_panel_open() or hover_panel_guard() then
         speed_panel_expand_showhide()
     end
 
@@ -5002,6 +5292,7 @@ local function osc_init()
     state.seekbar_element = elements["seekbar"]
     state.playlist_drawer_element = elements["playlist_drawer"]
     state.speed_element = elements["speed"]
+    state.subs_element = elements["sub_track"]
 
     prepare_elements()
     update_margins()
@@ -5037,8 +5328,7 @@ local function hide_osc()
     -- 清了会漏给 input.conf 的 MBTN_LEFT cycle pause
     -- 倍速面板同理：开着时面板要接点击，且清掉会让 run_autohide 认为光标
     -- 不在 input 区 → 底部栏被收起
-    if not state.playlist_drawer_visible and not state.speed_panel_open and
-        not (state.speed_panel_guard and mp.get_time() < state.speed_panel_guard) then
+    if not state.playlist_drawer_visible and not hover_panel_open() and not hover_panel_guard() then
         set_virt_mouse_area(0, 0, 0, 0, "input")
     end
     -- reset margins before hide_bar wipes the overlay
@@ -5056,6 +5346,11 @@ local function mouse_leave()
         state.speed_panel_guard_timer:kill()
         state.speed_panel_guard_timer = nil
     end
+    state.subs_panel_guard = nil
+    if state.subs_panel_guard_timer then
+        state.subs_panel_guard_timer:kill()
+        state.subs_panel_guard_timer = nil
+    end
     -- ZEX：倍速面板开着时 showhide 区已扩到整屏，能收到 mouse_leave 说明光标真
     -- 离开了窗口，此时收掉面板再走正常流程。收起动画播放中也直接收干净，
     -- 否则 out 动画播完后 cursor 已不在窗口，面板会卡在残留状态
@@ -5065,6 +5360,16 @@ local function mouse_leave()
             speed_panel_close(true)
         else
             speed_panel_finish_close()
+            request_init()
+        end
+    end
+    -- ZEX：字幕面板同款
+    state.subs_panel_suppress = false
+    if state.subs_panel_open then
+        if subs_panel.mouse_over() then
+            subs_panel.close(true)
+        else
+            subs_panel.finish_close()
             request_init()
         end
     end
@@ -5167,8 +5472,7 @@ local function refresh_input_area()
     -- ZEX：guard 缓冲窗口期间保持全屏捕获 —— 选档收起后 open=false，但鼠标还停在
     -- 原档位位置，捕获区若恢复底部栏，紧接着的第二次点击（双击档位/快速切档）会
     -- 漏给 input.conf 的 MBTN_LEFT cycle pause
-    if state.speed_panel_open or
-        (state.speed_panel_guard and mp.get_time() < state.speed_panel_guard) then
+    if hover_panel_open() or hover_panel_guard() then
         set_virt_mouse_area(0, 0, osc_param.playresx, osc_param.playresy, "input")
         set_virt_mouse_area(0, 0, osc_param.playresx, osc_param.playresy, "input_wheel")
         set_virt_mouse_area(0, 0, osc_param.playresx, osc_param.playresy, "input_mid")
@@ -5341,6 +5645,30 @@ local function process_event(source, what)
                     state.speed_panel_suppress = false
                     speed_panel_show()
                 end
+            elseif subs_panel.active() then
+                local sidx = subs_panel.hit_index()
+                if sidx then
+                    subs_panel.pick(sidx)             -- 点行切轨并收起
+                elseif not subs_panel.mouse_over() then
+                    subs_panel.toggle()               -- 点面板外空白 = 收起，不暂停
+                end
+            elseif state.subs_panel_guard and mp.get_time() < state.subs_panel_guard then
+                -- ZEX：面板刚收起（guard 缓冲窗口），同倍速面板那套兜底：点在原行上 =
+                -- 直接切轨，点在面板/按钮热区 = 重开面板，其它位置忽略（绝不漏成暂停）
+                local sx1, sy1, sx2, sy2 = subs_panel.rect()
+                if mouse_hit_coords(sx1, sy1, sx2, sy2) then
+                    local _, sy = get_virt_mouse_pos()
+                    local gidx = math.floor((sy - (sy1 + subs_panel.pad)) / subs_panel.row_h) + 1
+                    if gidx >= 1 and gidx <= #(state.subs_panel_items or {}) then
+                        subs_panel.pick(gidx)
+                    else
+                        state.subs_panel_suppress = false
+                        subs_panel.show()
+                    end
+                elseif subs_panel.mouse_over() then
+                    state.subs_panel_suppress = false
+                    subs_panel.show()
+                end
             elseif state.playlist_drawer_visible and not state.playlist_drawer_closing then
                 -- ZEX：抽屉开着时，点抽屉外空白 = 关闭抽屉，不切暂停
                 if not playlist_drawer_mouse_over() then
@@ -5365,7 +5693,9 @@ local function process_event(source, what)
         -- ZEX：倍速面板：悬停按钮打开、移出延迟关闭；光标在面板/按钮上时跳过
         -- 底部栏 deadzone 判定（showhide 已扩全屏，在面板上移动会命中 showhide）
         local over_speed = speed_panel_auto()
-        if over_speed then
+        -- ZEX：两个都要跑，短路会让另一个面板的延迟关闭不触发
+        local over_subs = subs_panel.auto()
+        if over_speed or over_subs then
             state.last_mouseX, state.last_mouseY = mouseX, mouseY
             local n = state.active_element
             if element_has_action(elements[n], action) then
@@ -5535,10 +5865,13 @@ local function render()
         end
     end
 
+    -- ZEX：鼠标捕获区也允许 mpv 按 cursor-autohide 隐藏光标。
+    -- 面板/抽屉会把 input 扩到整屏；缺少此标志会让整屏光标常驻。
+    -- 初次启用和 render 中重新启用都必须带上该标志。
     -- sync input area to cursor position
     if (state.osc_visible or state.playlist_drawer_visible) ~= state.input_enabled then
         if state.osc_visible or state.playlist_drawer_visible then
-            mp.enable_key_bindings("input")
+            mp.enable_key_bindings("input", "allow-hide-cursor")
         else
             mp.disable_key_bindings("input")
         end
@@ -5567,9 +5900,9 @@ local function render()
         return
     end
 
-    update_input_area("window-controls", state.wc_visible, "windowcontrols_buttons", function() mp.enable_key_bindings("window-controls") end)
-    update_input_area("window-controls-title", state.wc_visible, "windowcontrols_title", function() mp.enable_key_bindings("window-controls-title", "allow-vo-dragging") end)
-    update_input_area("window-controls-ontop", state.wc_visible, "windowcontrols_ontop", function() mp.enable_key_bindings("window-controls-ontop") end)
+    update_input_area("window-controls", state.wc_visible, "windowcontrols_buttons", function() mp.enable_key_bindings("window-controls", "allow-hide-cursor") end)
+    update_input_area("window-controls-title", state.wc_visible, "windowcontrols_title", function() mp.enable_key_bindings("window-controls-title", "allow-vo-dragging+allow-hide-cursor") end)
+    update_input_area("window-controls-ontop", state.wc_visible, "windowcontrols_ontop", function() mp.enable_key_bindings("window-controls-ontop", "allow-hide-cursor") end)
 
     -- autohide
     local function run_autohide(showtime_key, hide_fn, input_areas, visible_key)
@@ -5583,9 +5916,8 @@ local function render()
             -- 自动收起底部栏：run_autohide 靠 mouse_in_area("input") 判断光标，而面板
             -- 大部分画在 input 区（底部栏那条）上方，直接判断会误以为光标离开控制区
             -- → 1.5s 后整条栏（含倍速按钮和数字）被收走
-            local speed_blocks_hide = (state.speed_panel_open or
-                (state.speed_panel_guard and mp.get_time() < state.speed_panel_guard))
-                and speed_panel_mouse_over()
+            local speed_blocks_hide = (hover_panel_open() or hover_panel_guard())
+                and hover_panel_mouse_over()
             if not element_blocks_hide and not speed_blocks_hide
                 and (not user_opts.keep_with_cursor or not mouse_in_area(input_areas)) then
                 -- ZEX：已经藏过的栏别反复 hide —— hide_osc 每次调用都有副作用
@@ -5629,6 +5961,10 @@ local function render()
     -- ZEX：倍速档位面板画到独立 overlay（物理像素 = 显示器分辨率，不受 osd-scale 缩放）
     if state.speed_panel_open then
         draw_speed_panel()
+    end
+
+    if state.subs_panel_open then
+        subs_panel.draw()
     end
 
     if user_opts.persistent_progress or state.persistent_progress_toggle then
@@ -5887,25 +6223,25 @@ mp.set_key_bindings({
     {"shift+mbtn_left_dbl", "ignore"},
     {"mbtn_right_dbl",      "ignore"},
 }, "input", "force")
-mp.enable_key_bindings("input")
+mp.enable_key_bindings("input", "allow-hide-cursor")
 
 mp.set_key_bindings({
     {"wheel_up",   function() process_event("wheel_up", "press") end},
     {"wheel_down", function() process_event("wheel_down", "press") end},
 }, "input_wheel", "force")
-mp.enable_key_bindings("input_wheel")
+mp.enable_key_bindings("input_wheel", "allow-hide-cursor")
 
 mp.set_key_bindings({
     {"mbtn_mid", function() process_event("shift+mbtn_left", "up") end,
                  function() process_event("shift+mbtn_left", "down")  end},
 }, "input_mid", "force")
-mp.enable_key_bindings("input_mid")
+mp.enable_key_bindings("input_mid", "allow-hide-cursor")
 
 mp.set_key_bindings({
     {"mbtn_left",           function() process_event("mbtn_left", "up") end,
                             function() process_event("mbtn_left", "down")  end},
 }, "window-controls", "force")
-mp.enable_key_bindings("window-controls")
+mp.enable_key_bindings("window-controls", "allow-hide-cursor")
 
 mp.set_key_bindings({
     {"mbtn_left",           function() process_event("mbtn_left", "up") end,

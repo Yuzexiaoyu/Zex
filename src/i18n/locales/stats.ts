@@ -21,6 +21,9 @@ export const zh: Record<string, string> = {
 
   // 调整时长弹窗
   'stats.adjustDuration': '调整时长',
+  'stats.deleteRecord': '删去这条记录',
+  'stats.deleteRecordConfirm': '删去「{name}」这条统计记录？该游戏不在库里、也没有归档，删掉后统计总时长会相应减少，且不可恢复。',
+  'stats.deleteRecordFailed': '删除失败：{msg}',
   'stats.adjustGameTitle': '调整游戏时长',
   'stats.currentDuration': '当前时长：',
   'stats.hours': '小时',
@@ -53,6 +56,9 @@ export const en: Record<string, string> = {
 
   // Adjust playtime modal
   'stats.adjustDuration': 'Adjust playtime',
+  'stats.deleteRecord': 'Delete this record',
+  'stats.deleteRecordConfirm': 'Delete the stats record for "{name}"? This game is not in the library and has no archive; the total playtime will drop accordingly and cannot be undone.',
+  'stats.deleteRecordFailed': 'Delete failed: {msg}',
   'stats.adjustGameTitle': 'Adjust game playtime',
   'stats.currentDuration': 'Current: ',
   'stats.hours': 'Hours',

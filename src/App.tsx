@@ -91,6 +91,11 @@ export default function App() {
   // 从托盘恢复时跳过入场动画（hero-in / fade-up 等），避免 mid-animation 的遮罩错位闪烁
   const skipAnimRef = useRef(false);
 
+  // 不等待用户打开磁盘管理才枚举卷；后台预读不阻塞主界面初始化。
+  useEffect(() => {
+    void api.preloadDiskVolumes().catch(() => {});
+  }, []);
+
   // ── Xbox 手柄：挂载轮询服务 + 读开关；无手柄时服务零开销 ──
   useEffect(() => {
     startGamepad();
@@ -178,14 +183,15 @@ export default function App() {
     return () => mq.removeEventListener('change', apply);
   }, [theme]);
 
-  // 游玩时长的累计与结算全部由后端 4 秒定时线程完成（最小化到托盘后照常记录）。
-  // 这里只在游戏运行期间定时刷新列表，让悬停/详情里的时长跟着涨；窗口隐藏时
-  // 这个定时器被 WebView 节流也无所谓，数据早已写库
+  // 游玩时长的累计与结算全部由后端 30 秒定时线程完成（最小化到托盘后照常记录）。
+  // 这里只在游戏运行期间定时刷新列表，让悬停/详情里的时长跟着涨；间隔与后端
+  // 写库节奏一致（30 秒），更快的刷新只会反复读到同一个数。窗口隐藏时这个定时器
+  // 被 WebView 节流也无所谓，数据早已写库
   useEffect(() => {
     if (!runningGameId) return;
     const timer = window.setInterval(() => {
       useAppStore.getState().loadGames().catch(() => {});
-    }, 4000);
+    }, 30000);
     return () => window.clearInterval(timer);
   }, [runningGameId]);
 
@@ -273,6 +279,11 @@ export default function App() {
         // 自动续播下一集：刷新库让「继续观看」跟着走
         listen<string>('episode-changed', () => {
           useAppStore.getState().loadSeries().catch(() => {});
+        }),
+        // 肃正协议合并了对端进度 → 刷新库与统计（「继续观看」随之更新）
+        listen<number>('progress-synced', () => {
+          useAppStore.getState().loadSeries().catch(() => {});
+          useAppStore.getState().loadStats().catch(() => {});
         }),
         // mpv 窗口已全屏就绪（首次启动 = 文件加载完成；换集 = 立即）：
         // 此刻才收 ZEX，进播放器不再闪桌面。影视接管时清音乐播放条

@@ -40,5 +40,11 @@ dist-ssr
 *.sln
 *.sw?
 
+# 代码签名私钥备份，绝不能入库
+scripts/cert/*.pfx
+
+# 打包脚本产物（release\ZEX_*_绿色版.zip）
+release/
+
 # OS
 Thumbs.db

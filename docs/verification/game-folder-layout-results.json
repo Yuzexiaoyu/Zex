@@ -1,0 +1,716 @@
+{
+  "timestamp": "2026-10-28T05:05:04.882Z",
+  "browser": "Chrome headless",
+  "backend": "Tauri IPC mocked; real React components and CSS",
+  "results": [
+    {
+      "test": "layout 1920x1080 anchor=40",
+      "status": "pass",
+      "rect": {
+        "x": 212,
+        "y": 120,
+        "width": 602,
+        "height": 744.5,
+        "top": 120,
+        "right": 814,
+        "bottom": 864.5,
+        "left": 212
+      },
+      "columns": 4,
+      "widths": [
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134
+      ],
+      "horizontalOverflow": false,
+      "bodyScroll": 0,
+      "fullyVisible": 12,
+      "partlyVisible": 0,
+      "bodyHeight": 648,
+      "bodyScrollHeight": 1708
+    },
+    {
+      "test": "layout 1920x1080 anchor=1700",
+      "status": "pass",
+      "rect": {
+        "x": 1086,
+        "y": 120,
+        "width": 602,
+        "height": 744.5,
+        "top": 120,
+        "right": 1688,
+        "bottom": 864.5,
+        "left": 1086
+      },
+      "columns": 4,
+      "widths": [
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134
+      ],
+      "horizontalOverflow": false,
+      "bodyScroll": 0,
+      "fullyVisible": 12,
+      "partlyVisible": 0,
+      "bodyHeight": 648,
+      "bodyScrollHeight": 1708
+    },
+    {
+      "test": "layout 1366x768 anchor=600",
+      "status": "pass",
+      "rect": {
+        "x": 756,
+        "y": 15.5,
+        "width": 602,
+        "height": 744.5,
+        "top": 15.5,
+        "right": 1358,
+        "bottom": 760,
+        "left": 756
+      },
+      "columns": 4,
+      "widths": [
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134
+      ],
+      "horizontalOverflow": false,
+      "bodyScroll": 0,
+      "fullyVisible": 12,
+      "partlyVisible": 0,
+      "bodyHeight": 648,
+      "bodyScrollHeight": 1708
+    },
+    {
+      "test": "layout 960x600 anchor=400",
+      "status": "pass",
+      "rect": {
+        "x": 350,
+        "y": 8,
+        "width": 602,
+        "height": 584,
+        "top": 8,
+        "right": 952,
+        "bottom": 592,
+        "left": 350
+      },
+      "columns": 4,
+      "widths": [
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134
+      ],
+      "horizontalOverflow": false,
+      "bodyScroll": 0,
+      "fullyVisible": 8,
+      "partlyVisible": 4,
+      "bodyHeight": 488,
+      "bodyScrollHeight": 1708
+    },
+    {
+      "test": "layout 640x480 anchor=200",
+      "status": "pass",
+      "rect": {
+        "x": 30,
+        "y": 8,
+        "width": 602,
+        "height": 464,
+        "top": 8,
+        "right": 632,
+        "bottom": 472,
+        "left": 30
+      },
+      "columns": 4,
+      "widths": [
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134
+      ],
+      "horizontalOverflow": false,
+      "bodyScroll": 0,
+      "fullyVisible": 4,
+      "partlyVisible": 4,
+      "bodyHeight": 368,
+      "bodyScrollHeight": 1708
+    },
+    {
+      "test": "layout 320x480 anchor=100",
+      "status": "pass",
+      "rect": {
+        "x": 8,
+        "y": 8,
+        "width": 304,
+        "height": 464,
+        "top": 8,
+        "right": 312,
+        "bottom": 472,
+        "left": 8
+      },
+      "columns": 1,
+      "widths": [
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134,
+        134
+      ],
+      "horizontalOverflow": false,
+      "bodyScroll": 0,
+      "fullyVisible": 1,
+      "partlyVisible": 1,
+      "bodyHeight": 351,
+      "bodyScrollHeight": 6372
+    },
+    {
+      "test": "resize with popover open",
+      "status": "pass"
+    },
+    {
+      "test": "light theme renders without overflow",
+      "status": "pass",
+      "data": {
+        "rect": {
+          "x": 212,
+          "y": 120,
+          "width": 602,
+          "height": 744.5,
+          "top": 120,
+          "right": 814,
+          "bottom": 864.5,
+          "left": 212
+        },
+        "columns": 4,
+        "widths": [
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134
+        ],
+        "horizontalOverflow": false,
+        "bodyScroll": 0,
+        "fullyVisible": 12,
+        "partlyVisible": 0,
+        "bodyHeight": 648,
+        "bodyScrollHeight": 1708
+      }
+    },
+    {
+      "test": "member count 0",
+      "status": "pass",
+      "data": {
+        "rect": {
+          "x": 212,
+          "y": 120,
+          "width": 602,
+          "height": 314.5,
+          "top": 120,
+          "right": 814,
+          "bottom": 434.5,
+          "left": 212
+        },
+        "columns": 0,
+        "widths": [],
+        "horizontalOverflow": false,
+        "bodyScroll": 0,
+        "fullyVisible": 0,
+        "partlyVisible": 0,
+        "bodyHeight": 218,
+        "bodyScrollHeight": 218
+      }
+    },
+    {
+      "test": "member count 1",
+      "status": "pass",
+      "data": {
+        "rect": {
+          "x": 212,
+          "y": 120,
+          "width": 602,
+          "height": 320.5,
+          "top": 120,
+          "right": 814,
+          "bottom": 440.5,
+          "left": 212
+        },
+        "columns": 1,
+        "widths": [
+          134
+        ],
+        "horizontalOverflow": false,
+        "bodyScroll": 0,
+        "fullyVisible": 1,
+        "partlyVisible": 0,
+        "bodyHeight": 224,
+        "bodyScrollHeight": 224
+      }
+    },
+    {
+      "test": "member count 5",
+      "status": "pass",
+      "data": {
+        "rect": {
+          "x": 212,
+          "y": 120,
+          "width": 602,
+          "height": 532.5,
+          "top": 120,
+          "right": 814,
+          "bottom": 652.5,
+          "left": 212
+        },
+        "columns": 4,
+        "widths": [
+          134,
+          134,
+          134,
+          134,
+          134
+        ],
+        "horizontalOverflow": false,
+        "bodyScroll": 0,
+        "fullyVisible": 5,
+        "partlyVisible": 0,
+        "bodyHeight": 436,
+        "bodyScrollHeight": 436
+      }
+    },
+    {
+      "test": "member count 6",
+      "status": "pass",
+      "data": {
+        "rect": {
+          "x": 212,
+          "y": 120,
+          "width": 602,
+          "height": 532.5,
+          "top": 120,
+          "right": 814,
+          "bottom": 652.5,
+          "left": 212
+        },
+        "columns": 4,
+        "widths": [
+          134,
+          134,
+          134,
+          134,
+          134,
+          134
+        ],
+        "horizontalOverflow": false,
+        "bodyScroll": 0,
+        "fullyVisible": 6,
+        "partlyVisible": 0,
+        "bodyHeight": 436,
+        "bodyScrollHeight": 436
+      }
+    },
+    {
+      "test": "member count 12",
+      "status": "pass",
+      "data": {
+        "rect": {
+          "x": 212,
+          "y": 120,
+          "width": 602,
+          "height": 744.5,
+          "top": 120,
+          "right": 814,
+          "bottom": 864.5,
+          "left": 212
+        },
+        "columns": 4,
+        "widths": [
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134
+        ],
+        "horizontalOverflow": false,
+        "bodyScroll": 0,
+        "fullyVisible": 12,
+        "partlyVisible": 0,
+        "bodyHeight": 648,
+        "bodyScrollHeight": 648
+      }
+    },
+    {
+      "test": "member count 13",
+      "status": "pass",
+      "data": {
+        "rect": {
+          "x": 212,
+          "y": 120,
+          "width": 602,
+          "height": 744.5,
+          "top": 120,
+          "right": 814,
+          "bottom": 864.5,
+          "left": 212
+        },
+        "columns": 4,
+        "widths": [
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134,
+          134
+        ],
+        "horizontalOverflow": false,
+        "bodyScroll": 0,
+        "fullyVisible": 12,
+        "partlyVisible": 0,
+        "bodyHeight": 648,
+        "bodyScrollHeight": 860
+      }
+    },
+    {
+      "test": "wheel scroll stays inside popover",
+      "status": "pass"
+    },
+    {
+      "test": "four-column cross-row reorder; no accidental launch",
+      "status": "pass",
+      "command": {
+        "cmd": "reorder_folder_games",
+        "args": {
+          "folderId": "test-folder",
+          "orderedIds": [
+            "member-1",
+            "member-2",
+            "member-3",
+            "member-4",
+            "member-5",
+            "member-6",
+            "member-7",
+            "member-8",
+            "member-9",
+            "member-0",
+            "member-10",
+            "member-11",
+            "member-12",
+            "member-13",
+            "member-14",
+            "member-15",
+            "member-16",
+            "member-17",
+            "member-18",
+            "member-19",
+            "member-20",
+            "member-21",
+            "member-22",
+            "member-23",
+            "member-24",
+            "member-25",
+            "member-26",
+            "member-27",
+            "member-28",
+            "member-29"
+          ]
+        }
+      }
+    },
+    {
+      "test": "popover follows anchor after column change",
+      "status": "pass",
+      "anchor": {
+        "x": 10,
+        "y": 90,
+        "width": 302.65625,
+        "height": 453.984375
+      },
+      "panel": {
+        "x": 324.65625,
+        "y": 90,
+        "width": 602,
+        "height": 744.5,
+        "top": 90,
+        "right": 926.65625,
+        "bottom": 834.5,
+        "left": 324.65625
+      }
+    },
+    {
+      "test": "Escape closes popover",
+      "status": "pass"
+    },
+    {
+      "test": "expanded panel wins over covered folder; insertion ghost and clone stay 134px",
+      "status": "pass",
+      "commands": [
+        {
+          "cmd": "set_games_folder",
+          "args": {
+            "gameIds": [
+              "outside-6"
+            ],
+            "folderId": "test-folder"
+          }
+        },
+        {
+          "cmd": "reorder_folder_games",
+          "args": {
+            "folderId": "test-folder",
+            "orderedIds": [
+              "member-0",
+              "member-1",
+              "member-2",
+              "outside-6",
+              "member-3",
+              "member-4",
+              "member-5",
+              "member-6",
+              "member-7",
+              "member-8",
+              "member-9",
+              "member-10",
+              "member-11",
+              "member-12",
+              "member-13",
+              "member-14",
+              "member-15",
+              "member-16",
+              "member-17",
+              "member-18",
+              "member-19",
+              "member-20",
+              "member-21",
+              "member-22",
+              "member-23",
+              "member-24",
+              "member-25",
+              "member-26",
+              "member-27",
+              "member-28",
+              "member-29"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "test": "external drag scrolls panel without scrolling background",
+      "status": "pass",
+      "scrolls": {
+        "main": 0,
+        "body": 48
+      }
+    },
+    {
+      "test": "drag member out to main grid",
+      "status": "pass",
+      "command": {
+        "cmd": "set_games_folder",
+        "args": {
+          "gameIds": [
+            "member-0"
+          ],
+          "folderId": null
+        }
+      }
+    }
+  ],
+  "errors": []
+}

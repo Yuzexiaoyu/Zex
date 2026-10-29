@@ -1,0 +1,41 @@
+        Info Looking up installed tauri packages to check mismatched versions...
+        Warn The bundle identifier "com.zex.app" set in `"tauri.conf.json" identifier` ends with `.app`. This is not recommended because it conflicts with the application bundle extension on macOS.
+     Running beforeBuildCommand `npm run build`
+
+> tauri-app@0.1.0 build
+> tsc && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1878 modules transformed.
+rendering chunks...
+[plugin vite:reporter] 
+(!) D:/ZEX/node_modules/@tauri-apps/api/event.js is dynamically imported by D:/ZEX/src/components/SteamScanModal.tsx, D:/ZEX/src/views/SeriesDetail.tsx, D:/ZEX/src/views/SettingsView.tsx, D:/ZEX/src/views/SettingsView.tsx but also statically imported by D:/ZEX/node_modules/@tauri-apps/api/window.js, D:/ZEX/src/App.tsx, D:/ZEX/src/components/DiskManagerModal.tsx, D:/ZEX/src/components/GameRestoreDialog.tsx, D:/ZEX/src/components/SeriesDiskManagerModal.tsx, D:/ZEX/src/desktop-lyrics.tsx, D:/ZEX/src/gamepad/service.ts, D:/ZEX/src/tray-menu.tsx, D:/ZEX/src/views/SeriesView.tsx, dynamic import will not move module into another chunk.
+
+computing gzip size...
+dist/index.html                           1.71 kB │ gzip:   1.12 kB
+dist/assets/zex-logo-ChFSnFto.png        33.32 kB
+dist/assets/index-Du9O_ms-.css           99.05 kB │ gzip:  18.31 kB
+dist/assets/desktop-lyrics-OOs7KzBF.js    4.55 kB │ gzip:   1.91 kB
+dist/assets/tray-menu-CeJJvp7j.js         5.56 kB │ gzip:   1.92 kB
+dist/assets/index-l-8JN3fT.js             7.42 kB │ gzip:   1.97 kB
+dist/assets/index-BS9gack7.js           644.75 kB │ gzip: 185.37 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 5.06s
+   Compiling zex v0.1.0 (D:\ZEX\src-tauri)
+warning: linker stdout:   正在创建库 D:\ZEX\src-tauri\target\release\deps\zex_lib.dll.lib 和对象 D:\ZEX\src-tauri\target\release\deps\zex_lib.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `zex` (lib) generated 1 warning
+warning: linker stdout:   正在创建库 D:\ZEX\src-tauri\target\release\deps\zex.lib 和对象 D:\ZEX\src-tauri\target\release\deps\zex.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `zex` (bin "zex") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 1m 34s
+       Built application at: D:\ZEX\src-tauri\target\release\zex.exe

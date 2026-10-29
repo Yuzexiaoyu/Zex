@@ -1,0 +1,54 @@
+[
+  {
+    "mode": "single",
+    "rows": [
+      {
+        "duration": "0.075s",
+        "delay": "0s",
+        "name": "card-enter"
+      },
+      {
+        "duration": "0.075s",
+        "delay": "0.0075s",
+        "name": "card-enter"
+      },
+      {
+        "duration": "0.075s",
+        "delay": "0.015s",
+        "name": "card-enter"
+      },
+      {
+        "duration": "0.075s",
+        "delay": "0.0225s",
+        "name": "card-enter"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "mode": "multi",
+    "rows": [
+      {
+        "duration": "0.075s",
+        "delay": "0s",
+        "name": "card-enter"
+      },
+      {
+        "duration": "0.075s",
+        "delay": "0.003s",
+        "name": "card-enter"
+      },
+      {
+        "duration": "0.075s",
+        "delay": "0.006s",
+        "name": "card-enter"
+      },
+      {
+        "duration": "0.075s",
+        "delay": "0.009s",
+        "name": "card-enter"
+      }
+    ],
+    "errors": []
+  }
+]

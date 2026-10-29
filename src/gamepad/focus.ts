@@ -14,6 +14,9 @@ export interface GroupOpts {
   activate: (index: number) => void;
   /** 焦点移到 index 时保证其可见（如滚动容器 scrollToIndex） */
   scrollIntoView?: (index: number) => void;
+  /** 该项不可聚焦（如游戏库里文件夹留出的空格）：方向键沿同方向继续跳过它，
+   *  整条路都被 skip 时按边界处理（leave / 停住）。不传 = 所有项都可聚焦 */
+  skip?: (index: number) => boolean;
   /** 焦点在边界且继续朝 dir 移动时跳转（跨区域）；不定义则停在边界 */
   leave?: (dir: Dir, index: number) => void;
   /** 该组被 B 弹栈时调用（关闭弹层/详情） */
@@ -86,55 +89,57 @@ export const useFocusStore = create<FocusStore>((set, get) => ({
     const opts = registry.get(top.group);
     if (!opts || opts.count <= 0) return;
     // 未聚焦待命态（reset 后还没按过方向键）：任何方向都落到第 0 项，
-    // 避免启动/切视图就自动选中第一项（如游戏库首个游戏弹出悬停封面）
+    // 避免启动/切视图就自动选中第一项（如游戏库首个游戏弹出悬停封面）。
+    // 第 0 项不可聚焦（空格）时往后找第一个能聚焦的
     if (top.index == null) {
+      let first = 0;
+      while (first < opts.count && opts.skip?.(first)) first += 1;
+      if (first >= opts.count) return;
       set((s) => {
         const stack = s.stack.slice();
-        stack[stack.length - 1] = { ...stack[stack.length - 1], index: 0 };
+        stack[stack.length - 1] = { ...stack[stack.length - 1], index: first };
         return { stack };
       });
-      opts.scrollIntoView?.(0);
+      opts.scrollIntoView?.(first);
       return;
     }
     const { count, cols = count } = opts;
     const index = top.index;
-    let next = index;
-    let crossed = false;
     if (dir === 'left' || dir === 'right') {
-      // 行内左右优先交给 horizontal 处理器（设置页 chips 切换等）；未消费才移动行
+      // 行内左右优先交给 horizontal 处理器（设置页的 chips 切换等）；未消费才移动行
       if (opts.horizontal?.(dir, index)) return;
     }
-    if (cols > 1) {
-      const row = Math.floor(index / cols);
-      const col = index % cols;
-      const lastIdx = count - 1;
-      const lastRow = Math.floor(lastIdx / cols);
-      const lastRowCol = lastIdx % cols;
-      switch (dir) {
-        case 'left':
-          if (col > 0) next = index - 1; else crossed = true;
-          break;
-        case 'right':
-          if (col < (row === lastRow ? lastRowCol : cols - 1)) next = index + 1; else crossed = true;
-          break;
-        case 'up':
-          if (row > 0) next = index - cols; else crossed = true;
-          break;
-        case 'down':
-          if (row < lastRow) next = Math.min(count - 1, index + cols); else crossed = true;
-          break;
+    // 单步位移：规则网格按行列算，列表按前后算。crossed = 已经贴在该方向的边界上
+    const step = (from: number): { next: number; crossed: boolean } => {
+      const stay = { next: from, crossed: true };
+      if (cols > 1) {
+        const row = Math.floor(from / cols);
+        const col = from % cols;
+        const lastIdx = count - 1;
+        const lastRow = Math.floor(lastIdx / cols);
+        const lastRowCol = lastIdx % cols;
+        if (dir === 'left') return col > 0 ? { next: from - 1, crossed: false } : stay;
+        if (dir === 'right') {
+          return col < (row === lastRow ? lastRowCol : cols - 1) ? { next: from + 1, crossed: false } : stay;
+        }
+        if (dir === 'up') return row > 0 ? { next: from - cols, crossed: false } : stay;
+        return row < lastRow ? { next: Math.min(count - 1, from + cols), crossed: false } : stay;
       }
-    } else {
-      switch (dir) {
-        case 'left': case 'up':
-          if (index > 0) next = index - 1; else crossed = true;
-          break;
-        case 'right': case 'down':
-          if (index < count - 1) next = index + 1; else crossed = true;
-          break;
+      if (dir === 'left' || dir === 'up') {
+        return from > 0 ? { next: from - 1, crossed: false } : stay;
       }
+      return from < count - 1 ? { next: from + 1, crossed: false } : stay;
+    };
+    // 不可聚焦项（如游戏库里文件夹留出的空格）沿同方向继续跳；
+    // 整条路都跳不出来就按边界处理（与原来撞边界的行为一致）
+    let next = index;
+    for (let guard = 0; guard <= count; guard++) {
+      const r = step(next);
+      if (r.crossed) { opts.leave?.(dir, index); return; }
+      next = r.next;
+      if (!opts.skip?.(next)) break;
     }
-    if (crossed) { opts.leave?.(dir, index); return; }
+    if (opts.skip?.(next)) return;
     if (next !== index) {
       set((s) => {
         const stack = s.stack.slice();

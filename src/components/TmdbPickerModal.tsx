@@ -8,7 +8,7 @@ interface Props {
   title: string;                 // 用于搜索的原标题
   results: TmdbSearchResult[];
   currentId?: number;            // 已关联的 TMDB ID（若有则标出来）
-  onPick: (id: number) => void;
+  onPick: (result: TmdbSearchResult) => void;
   onClose: () => void;
 }
 
@@ -23,7 +23,7 @@ export default function TmdbPickerModal({ title, results, currentId, onPick, onC
     count: results.length,
     cols: 1,
     scrollIntoView: (i) => document.querySelector(`[data-tmdb-opt="${i}"]`)?.scrollIntoView({ block: 'nearest' }),
-    activate: (i) => onPick(results[i].id),
+    activate: (i) => onPick(results[i]),
   });
 
   return (
@@ -57,7 +57,7 @@ export default function TmdbPickerModal({ title, results, currentId, onPick, onC
               <button
                 key={r.id}
                 data-tmdb-opt={i}
-                onClick={() => onPick(r.id)}
+                onClick={() => onPick(r)}
                 className={clsx('tmdb-option', isCurrent && 'current', focused === i && 'gamepad-focus')}
               >
                 {r.poster_url ? (
@@ -76,6 +76,11 @@ export default function TmdbPickerModal({ title, results, currentId, onPick, onC
                       <span className="flex items-center gap-1 text-xs text-yellow-400/90">
                         <Star size={10} fill="currentColor" />
                         {r.vote_average.toFixed(1)}
+                      </span>
+                    )}
+                    {r.media_type && (
+                      <span className="badge">
+                        {r.media_type === 'movie' ? t('misc.mediaTypeMovie') : t('misc.mediaTypeTv')}
                       </span>
                     )}
                     {isCurrent && <span className="badge badge-accent">{t('misc.tmdbCurrent')}</span>}

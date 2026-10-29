@@ -37,6 +37,8 @@ function TrayMenuBody() {
   const [progress, setProgress] = useState<{ positionMs: number; durationMs: number; playing: boolean } | null>(null);
   // 隐藏的库（settings 表 hidden_libraries）：菜单里不再显示对应库项
   const [hiddenLibs, setHiddenLibs] = useState<string[]>([]);
+  const [hiddenLibsLoaded, setHiddenLibsLoaded] = useState(false);
+  const hiddenLibsLoadedRef = useRef(false);
   const metaRef = useRef<api.MusicNowPlaying | null>(null);
   const applyMeta = (m: api.MusicNowPlaying | null) => { metaRef.current = m; setMeta(m); };
   const refreshMeta = () => { void api.getMusicNowPlaying().then(applyMeta).catch(() => {}); };
@@ -44,8 +46,13 @@ function TrayMenuBody() {
   // 拉初始状态 + 订阅播放事件（托盘窗口常驻隐藏，事件流持续喂它，弹出即最新）
   useEffect(() => {
     void api.getSetting('hidden_libraries').then((v) => {
-      if (v) setHiddenLibs(v.split(',').filter(Boolean));
-    }).catch(() => {});
+      setHiddenLibs(v ? v.split(',').filter(Boolean) : []);
+      hiddenLibsLoadedRef.current = true;
+      setHiddenLibsLoaded(true);
+    }).catch(() => {
+      hiddenLibsLoadedRef.current = true;
+      setHiddenLibsLoaded(true);
+    });
     let stops: Array<() => void> = [];
     let cancelled = false;
     (async () => {
@@ -78,12 +85,20 @@ function TrayMenuBody() {
         // 停止 / 影视接管：清空正在播放区
         listen<void>('mpv-closed', () => { seekPendingRef.current = false; seekTargetRef.current = null; setDragRatio(null); applyMeta(null); setProgress(null); }),
         listen<void>('mpv-ready', () => { seekPendingRef.current = false; seekTargetRef.current = null; setDragRatio(null); applyMeta(null); setProgress(null); }),
-        // 每次右键弹出：按当前内容重新校准窗口高度（兜底 ResizeObserver）+ 刷新隐藏库设置
+        // 每次右键弹出：先刷新隐藏库设置，必须等 React 用最新配置完成重绘后才回报高度，
+        // 不允许先用上次弹出的旧状态回报高度（隐藏库刚改完并收进托盘时尤其明显）
         listen<void>('tray-menu-shown', () => {
-          reportHeight();
           void api.getSetting('hidden_libraries').then((v) => {
             setHiddenLibs(v ? v.split(',').filter(Boolean) : []);
-          }).catch(() => {});
+            hiddenLibsLoadedRef.current = true;
+            setHiddenLibsLoaded(true);
+            // setState 后下一帧 DOM 才是新菜单，届时再测量并触发首次显示
+            requestAnimationFrame(reportHeight);
+          }).catch(() => {
+            hiddenLibsLoadedRef.current = true;
+            setHiddenLibsLoaded(true);
+            requestAnimationFrame(reportHeight);
+          });
         }),
       ]);
       if (cancelled) subs.forEach((s) => s()); else stops = subs;
@@ -100,12 +115,12 @@ function TrayMenuBody() {
   };
   useLayoutEffect(() => {
     const el = wrapperRef.current;
-    if (!el) return;
+    if (!el || !hiddenLibsLoaded) return;
     reportHeight();
     const ro = new ResizeObserver(reportHeight);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [hiddenLibsLoaded]);
 
   useLayoutEffect(() => {
     const onBlur = () => invoke('close_tray_menu');

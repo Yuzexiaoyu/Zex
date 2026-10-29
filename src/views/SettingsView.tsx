@@ -308,9 +308,17 @@ export default function SettingsView() {
   const [mpvOk, setMpvOk] = useState(true);
   // 播放音乐时默认显示歌词（默认关，只有显式存过 "1" 才开）
   const [lyricsAutoShow, setLyricsAutoShow] = useState(false);
+  // 肃正协议：跨端进度同步开关 + 核心目录（NAS 上的路径，UNC 或映射盘）。桌面默认关。
+  const [syncEnabled, setSyncEnabled] = useState(false);
+  const [syncDir, setSyncDir] = useState('');
   const [fetchingCovers, setFetchingCovers] = useState(false);
   const [fetchProgress, setFetchProgress] = useState<{ done: number; total: number; ok: number; fail: number } | null>(null);
   const [fetchResult, setFetchResult] = useState<string | null>(null); // 完成结果（内联显示，不弹窗）
+  // Steam 游玩数据导入（库外时长写进统计存档）
+  const [importingPt, setImportingPt] = useState(false);
+  const [ptProgress, setPtProgress] = useState<{ done: number; total: number; added: number } | null>(null);
+  const [ptResult, setPtResult] = useState<string | null>(null);
+  const [ptFailed, setPtFailed] = useState(false);
   const [fetchFailed, setFetchFailed] = useState(false); // 失败标红（结果文案已词条化，不能再用前缀判断）
   // 手柄支持：开关 + 连接状态（品牌/数量，随插拔实时刷新）
   const [gamepadEnabled, setGamepadEnabledState] = useState(isGamepadEnabled());
@@ -330,6 +338,8 @@ export default function SettingsView() {
   const tmdbRef = useRef<HTMLInputElement>(null);
   const brandNameRef = useRef<HTMLInputElement>(null);
   const playerPathRef = useRef<HTMLInputElement>(null);
+  const syncDirRef = useRef<HTMLInputElement>(null);
+  const loadStats = useAppStore((s) => s.loadStats);
 
   // 动态留空：整页竖向节奏跟着「各列内容量 vs 可用高度」走（见 useSettingsRhythm）。
   // sig 里列齐所有会改变列高的东西：语言（文案换行行数）、条件行、分支行、状态行
@@ -391,6 +401,8 @@ export default function SettingsView() {
       api.mpvAvailable().then(setMpvOk),
       // 播放音乐时默认显示歌词：默认关，只有显式存过 "1" 才开
       api.getSetting('lyrics_auto_show').then((v) => setLyricsAutoShow(v === '1')),
+      api.getSetting('sync_enabled').then((v) => setSyncEnabled(v === '1')),
+      api.getSetting('sync_dir').then((v) => setSyncDir(v || '')),
     ]).then(() => { if (alive) setLoaded(true); });
     return () => { alive = false; };
   }, []);
@@ -482,6 +494,23 @@ export default function SettingsView() {
     };
   }, []);
 
+  // 监听「导入 Steam 游玩数据」的进度事件（同样挂载时注册一次，别错过开头）
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    import('@tauri-apps/api/event').then(async ({ listen }) => {
+      if (cancelled) return;
+      unlisten = await listen<{ done: number; total: number; added: number }>(
+        'steam-playtime-progress',
+        (e) => setPtProgress(e.payload),
+      );
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   const handleFetchAllCovers = async () => {
     setFetchingCovers(true);
     setFetchProgress(null);
@@ -500,6 +529,29 @@ export default function SettingsView() {
       setFetchFailed(true);
     } finally {
       setFetchingCovers(false);
+    }
+  };
+
+  const handleImportSteamPlaytime = async () => {
+    setImportingPt(true);
+    setPtProgress(null);
+    setPtResult(null);
+    setPtFailed(false);
+    try {
+      const res = await api.importSteamPlaytime();
+      await loadStats(); // 统计页立刻反映（库外时长写的是统计存档）
+      setPtResult(t('settings.steamPtResult', {
+        total: res.total,
+        updated: res.updated,
+        added: res.added,
+        skipped: res.skipped,
+        hours: Math.round(res.seconds / 360) / 10,
+      }));
+    } catch (err: any) {
+      setPtResult(t('settings.steamPtFailed', { msg: err.message }));
+      setPtFailed(true);
+    } finally {
+      setImportingPt(false);
     }
   };
 
@@ -563,6 +615,24 @@ export default function SettingsView() {
   const switchLyricsAutoShow = (v: boolean) => {
     setLyricsAutoShow(v);
     savePlayerSetting('lyrics_auto_show', v ? '1' : '0');
+  };
+
+  // 肃正协议：开关 / 核心目录即时保存；开→立即对账，关→删掉核心文件（路径保留、一直显示）
+  const switchSyncEnabled = (v: boolean) => {
+    setSyncEnabled(v);
+    void api.setSetting('sync_enabled', v ? '1' : '0')
+      .then(() => (v ? api.triggerSync() : api.syncPurge()))
+      .catch(() => {});
+  };
+  const saveSyncDir = () => {
+    void api.setSetting('sync_dir', syncDir.trim()).then(() => api.triggerSync()).catch(() => {});
+  };
+  const handleBrowseSyncDir = async () => {
+    const picked = await open({ directory: true });
+    if (typeof picked === 'string') {
+      setSyncDir(picked);
+      void api.setSetting('sync_dir', picked).then(() => api.triggerSync()).catch(() => {});
+    }
   };
 
   const switchFullscreen = (v: boolean) => {
@@ -725,7 +795,6 @@ export default function SettingsView() {
         rows: [
           {
             label: t('settings.theme'),
-            desc: t('settings.themeDesc'),
             chips: themeRows.map((r) => ({ active: () => theme === r.value, set: () => setTheme(r.value) })),
             children: (
               <div className="flex gap-2">
@@ -749,7 +818,6 @@ export default function SettingsView() {
           },
           {
             label: t('settings.language'),
-            desc: t('settings.languageDesc'),
             chips: LANGUAGES.map((l) => ({ active: () => lang === l.code, set: () => setLang(l.code) })),
             children: (
               <div className="flex gap-2">
@@ -773,7 +841,6 @@ export default function SettingsView() {
           },
           {
             label: t('settings.gameColumnsTitle'),
-            desc: t('settings.gameColumnsDesc'),
             onLeftRight: (dir) => setGameColumns(gameColumns + (dir === 'right' ? 1 : -1)),
             children: (
               <div className="flex items-center gap-4 shrink-0">
@@ -830,7 +897,6 @@ export default function SettingsView() {
           ...(autostart
             ? [{
                 label: t('settings.autostartMethod'),
-                desc: autostartShow ? t('settings.autostartShowDesc') : t('settings.autostartTrayDesc'),
                 chips: [
                   { active: () => !autostartShow, set: () => switchAutostartShow(false) },
                   { active: () => autostartShow, set: () => switchAutostartShow(true) },
@@ -908,7 +974,6 @@ export default function SettingsView() {
                   render: () => (
                     <div>
                       <p className="set-blk-title">{t('settings.playerPath')}</p>
-                      <p className="set-blk-desc">{t('settings.playerPathDesc')}</p>
                       <div className="set-blk-ctl flex gap-2">
                         <input
                           ref={playerPathRef}
@@ -1199,7 +1264,6 @@ export default function SettingsView() {
         rows: [
           {
             label: t('settings.exportData'),
-            desc: t('settings.exportDesc'),
             onA: () => void handleExport(),
             children: (
               <button onClick={() => void handleExport()} disabled={exporting} className="btn btn-glass gap-2 text-sm">
@@ -1210,13 +1274,50 @@ export default function SettingsView() {
           },
           {
             label: t('settings.importData'),
-            desc: t('settings.importDesc'),
             onA: () => void handleImport(),
             children: (
               <button onClick={() => void handleImport()} disabled={importing} className="btn btn-glass gap-2 text-sm">
                 <Upload size={15} />
                 {importing ? t('settings.importing') : t('settings.importBtn')}
               </button>
+            ),
+          },
+          {
+            // Steam 游玩数据：库外的写进统计存档（统计页可见），库内已有的按较大值校准
+            onA: () => void handleImportSteamPlaytime(),
+            render: () => (
+              <div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="set-row-text">
+                    <p className="set-row-label">{t('settings.importSteamPlaytime')}</p>
+                    <p className="set-row-desc">{t('settings.importSteamPlaytimeDesc')}</p>
+                  </div>
+                  <button
+                    onClick={() => void handleImportSteamPlaytime()}
+                    disabled={importingPt}
+                    className="btn btn-glass gap-2 text-sm shrink-0"
+                  >
+                    {importingPt && <Loader2 size={14} className="animate-spin" />}
+                    {importingPt ? t('settings.importing') : t('settings.importBtn')}
+                  </button>
+                </div>
+                {importingPt && ptProgress && ptProgress.total > 0 && (
+                  <div className="set-blk-ctl">
+                    <div className="h-1.5 rounded-full bg-bg-surface-active overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-[#00d4ff] transition-all duration-300"
+                        style={{ width: `${Math.round((ptProgress.done / ptProgress.total) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="set-blk-note text-text-secondary">
+                      {t('settings.steamPtProgress', { done: ptProgress.done, total: ptProgress.total, added: ptProgress.added })}
+                    </p>
+                  </div>
+                )}
+                {ptResult && (
+                  <p className={clsx('set-blk-note', ptFailed ? 'text-danger' : 'text-text-secondary')}>{ptResult}</p>
+                )}
+              </div>
             ),
           },
           {
@@ -1228,6 +1329,44 @@ export default function SettingsView() {
                 <Trash2 size={15} />
                 {clearing ? t('settings.clearing') : t('settings.clearBtn')}
               </button>
+            ),
+          },
+        ],
+      },
+      {
+        titleKey: 'settings.sync',
+        rows: [
+          {
+            label: t('settings.syncEnabled'),
+            desc: t('settings.syncHint'),
+            chips: [
+              { active: () => syncEnabled, set: () => switchSyncEnabled(true) },
+              { active: () => !syncEnabled, set: () => switchSyncEnabled(false) },
+            ],
+            children: onOffChips(syncEnabled, switchSyncEnabled),
+          },
+          {
+            onA: focusToggle(syncDirRef),
+            render: () => (
+              <div>
+                <p className="set-blk-title">{t('settings.syncLocation')}</p>
+                <p className="set-blk-desc">{t('settings.syncDirHintDesktop')}</p>
+                <div className="set-blk-ctl flex gap-2">
+                  <input
+                    ref={syncDirRef}
+                    value={syncDir}
+                    onChange={(e) => setSyncDir(e.target.value)}
+                    onBlur={saveSyncDir}
+                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    placeholder={t('settings.syncDirPlaceholderDesktop')}
+                    className="input flex-1 text-sm"
+                  />
+                  <button onClick={() => void handleBrowseSyncDir()} className="btn btn-glass gap-2 text-sm px-4 shrink-0">
+                    <FolderOpen size={14} />
+                    {t('settings.browse')}
+                  </button>
+                </div>
+              </div>
             ),
           },
         ],

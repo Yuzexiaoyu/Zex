@@ -3,6 +3,10 @@
 // ─────────────────────────────────────────────
 
 export interface Game {
+  archive_status?: '' | 'cleanup_pending' | 'archived';
+  archive_path?: string;
+  archive_size?: number;
+  archive_original_size?: number;
   id: string;
   name: string;
   install_dir: string;
@@ -22,7 +26,12 @@ export interface Game {
   created_at: string;
   updated_at: string;
   sort_order?: number;
+  // 绝对格号（0 基）：游戏钉死在库里第 slot 格，拖到哪就永远在哪，前面空着也不往前堆。
+  // -1 / 缺省 = 未定位（新添加的游戏）→ 落进第一个空格。与 GameFolder.slot 同一个格号空间
+  slot?: number;
   steam_appid: number;   // >0 = Steam 导入的游戏（移动时目标路径走 SteamLibrary 结构）
+  rtss_profile_name?: string; // RTSS profile 绑定的真身进程 exe 名；空 = 用 exe_path 文件名
+  monitor_process?: string;   // 手动指定的监听进程（计时 + 帧数/RTSS 目标）；空 = 自动识别
 }
 
 export interface GameFilter {
@@ -32,6 +41,30 @@ export interface GameFilter {
   sort_by?: 'name' | 'created_at' | 'updated_at' | 'total_seconds' | 'custom';
   sort_order?: 'asc' | 'desc';
 }
+
+// 游戏库文件夹：把多个游戏收成顶层的一格。game_ids 为文件夹内成员（已按文件夹内顺序），
+// 与 Playlist.track_ids 同款——一次拉全量，前端本地分组（见 utils/libraryCells.ts）。
+// 归属是排他的：一个游戏最多在一个文件夹里，进了文件夹就不在顶层单独占格
+export interface GameFolder {
+  id: string;
+  name: string;
+  // 绝对格号（0 基）：文件夹钉死在第 slot 格，游戏顺序流动时绕开它。-1 = 未定位（排末尾）
+  slot: number;
+  color: string;       // 预留：文件夹强调色（空 = 默认青）
+  cover_path: string;  // 自定义封面（covers 目录绝对路径，空 = 卡片显示拼图墙）
+  created_at: string;
+  updated_at: string;
+  game_ids: string[];
+}
+
+// 游戏库网格里的「一格」：一个游戏，或一个文件夹。
+// key 同时用作 React key 与拖拽标识（g:<id> / f:<id>）
+export type LibraryCell =
+  | { kind: 'game'; key: string; game: Game }
+  | { kind: 'folder'; key: string; folder: GameFolder; games: Game[] };
+
+// 布局里的一格：null = 空格（文件夹钉得靠后、游戏填不满时的留白，也是合法落点）
+export type LibrarySlot = LibraryCell | null;
 
 export interface SteamGame {
   app_id: number;
@@ -75,6 +108,7 @@ export interface TmdbSearchResult {
   date: string;
   poster_url: string;
   vote_average: number;
+  media_type?: MediaType; // 混合搜索时命中项的实际类型
 }
 
 // 「继续观看」指向的下一集（后端按季号+集号取第一条未看）
@@ -168,6 +202,8 @@ export interface Stats {
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system';
+// 音乐库列表形态：single = 原单列（信息列最全）/ multi = 紧凑多列（一屏曲目数约 3.6 倍）
+export type MusicLayout = 'single' | 'multi';
 export type SortField = 'name' | 'created_at' | 'updated_at' | 'total_seconds';
 export type SortOrder = 'asc' | 'desc';
 
@@ -189,6 +225,7 @@ export interface DiskVolume {
   available: number;
   removable: boolean;
   remote: boolean;      // SMB 等网络映射盘
+  unc: string;          // 远程映射盘的 UNC 根（\\server\share）；本地盘为空
 }
 
 // 单个游戏移动结果（磁盘管理「应用」）
@@ -200,6 +237,8 @@ export interface GameMoveResult {
   // Steam 清单 appmanifest_*.acf 已随文件夹搬到目标库：
   // 提示用户重启 Steam 客户端后即可识别
   steamManifestMoved?: boolean;
+  // 移动已成功（数据完整落在目标）但源目录被占用未删净，残留需手动清理。有值 → 警告色展示。
+  warning?: string | null;
 }
 
 // 影视磁盘管理：单个本地视频文件
@@ -227,6 +266,8 @@ export interface SeriesMoveResult {
   title: string;
   ok: boolean;
   error?: string | null;
+  // 同 GameMoveResult.warning：移动成功但源被占用未删净，残留需手动清理。
+  warning?: string | null;
 }
 
 // ─────────────────────────────────────────────

@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react';
-import { X, ImagePlus, Loader2, Check } from 'lucide-react';
+import { X, ImagePlus, Loader2, Check, FolderOpen } from 'lucide-react';
 import { clsx } from 'clsx';
-import type { Game } from '../types';
+import { message, open } from '@tauri-apps/plugin-dialog';
 import * as api from '../api';
 import { useModalGamepad } from '../gamepad';
 import { useT } from '../i18n';
 
+// applying 的哨兵值：标记「正在应用本地选的图」。用假路径而非真实路径，
+// 免得某个候选的 url 碰巧等于它而让网格里误转菊花
+const LOCAL_PICK = '__local_pick__';
+
 interface Props {
-  game: Game;
+  // 只用到 id 和 name：统计页的 TopEntry 行也能直接传进来换悬停封面
+  game: { id: string; name: string };
   kind?: api.CoverKind; // portrait 主封面（竖版）/ wide 悬停封面（横屏）
   onClose: () => void;
   onApplied: () => void;
@@ -35,6 +40,41 @@ export default function CoverPickerModal({ game, kind = 'portrait', onClose, onA
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [game.id, kind]);
+
+  // 本地选图 → 后端校验魔数后复制进 covers 目录（主封面写 cover_path，悬停封面写 banner_path）。
+  // SGDB 没有合适候选、或根本没配 API Key 时，这是唯一的换封面途径
+  const handlePickLocal = async () => {
+    if (applying !== null) return;
+    let selected: string;
+    try {
+      const sel = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: t('settings.filterImage'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }],
+      });
+      if (typeof sel !== 'string') return; // 取消
+      selected = sel;
+    } catch {
+      return;
+    }
+    setApplying(LOCAL_PICK);
+    try {
+      if (kind === 'wide') {
+        await api.setGameBanner(game.id, selected);
+      } else {
+        await api.setGameCover(game.id, selected);
+      }
+      onApplied();
+    } catch (err) {
+      // 失败走弹窗而不是 setError：error 态会把整个候选网格换成错误页，
+      // 选错一张图不该让已经拉到的 SGDB 候选消失
+      setApplying(null);
+      await message(typeof err === 'string' ? err : ((err as any)?.message || t('misc.coverSetFailed')), {
+        title: t('games.customCover'),
+        kind: 'error',
+      });
+    }
+  };
 
   const handlePick = async (opt: api.CoverOption) => {
     setApplying(opt.url);
@@ -65,21 +105,34 @@ export default function CoverPickerModal({ game, kind = 'portrait', onClose, onA
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-border-glass shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.2)] flex items-center justify-center">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.2)] flex items-center justify-center shrink-0">
               <ImagePlus size={18} className="text-[#00d4ff]" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-lg font-bold leading-tight">{kind === 'wide' ? t('games.changeBanner') : t('games.changeCover')}</h2>
-              <p className="text-xs text-text-secondary mt-0.5">{game.name}</p>
+              <p className="text-xs text-text-secondary mt-0.5 truncate">{game.name}</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-white hover:bg-bg-surface-active transition-all"
-          >
-            <X size={18} />
-          </button>
+          {/* 标题右侧：本地选图兜底入口 + 关闭 */}
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <button
+              onClick={handlePickLocal}
+              disabled={applying !== null}
+              className="btn btn-glass gap-2 text-sm px-4 h-9 disabled:opacity-50"
+            >
+              {applying === LOCAL_PICK
+                ? <Loader2 size={14} className="animate-spin" />
+                : <FolderOpen size={14} />}
+              {t('games.customCover')}
+            </button>
+            <button
+              onClick={onClose}
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-white hover:bg-bg-surface-active transition-all"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -96,8 +149,12 @@ export default function CoverPickerModal({ game, kind = 'portrait', onClose, onA
             </div>
           ) : options.length === 0 ? (
             <div className="py-16 text-center">
-              <p className="text-sm text-text-secondary mb-1">{t('misc.coverNonePortrait')}</p>
-              <p className="text-xs text-text-tertiary">{t('misc.coverNoneSgdb')}</p>
+              <p className="text-sm text-text-secondary mb-1">
+                {t(kind === 'wide' ? 'misc.coverNoneWide' : 'misc.coverNonePortrait')}
+              </p>
+              <p className="text-xs text-text-tertiary">
+                {t(kind === 'wide' ? 'misc.coverNoneSgdbWide' : 'misc.coverNoneSgdb')}
+              </p>
             </div>
           ) : (
             <div className={kind === 'wide' ? 'grid grid-cols-1 md:grid-cols-2 gap-3' : 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3'}>

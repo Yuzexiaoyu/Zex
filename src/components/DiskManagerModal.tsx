@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from '../store';
 import * as api from '../api';
-import { confirm, message } from '@tauri-apps/plugin-dialog';
+import { confirm, message, save } from '@tauri-apps/plugin-dialog';
 import { HardDrive, X, ArrowRight, Gamepad2, XCircle, AlertTriangle, Loader2, Check, SlidersHorizontal, Info } from 'lucide-react';
 import type { DiskVolume, Game, GameMoveResult } from '../types';
 import { useModalGamepad } from '../gamepad';
 import { useT } from '../i18n';
+import { useDiskManagerLayout } from '../utils/useDiskManagerLayout';
+import GameRestoreDialog from './GameRestoreDialog';
 
 // 待移动项（游戏 id → 迁移方案，同游戏多次拖拽以后一次为准）
 interface MoveItem {
@@ -47,13 +49,24 @@ function fmtBytes(n: number): string {
 // 目录大小会话缓存（模块级，应用生命周期内）：磁盘管理每次打开都全量重算几十 GB
 // 要等几分钟，同一会话内重开直接读缓存（游戏装卸后重启应用即重新计算，缓存只加速重复打开）
 const folderSizeCache = new Map<string, number>();
+let folderSizeGeneration = 0;
 
 // 游戏归属盘符：优先 install_dir（Steam 游戏带完整目录），否则 exe_path 首字母；
 // 无法判定返回 null（渲染处翻译成「未知」）
-function driveOf(g: Game): string | null {
-  const p = (g.install_dir || g.exe_path || '').trim();
+function driveOf(g: Game, volumes: DiskVolume[]): string | null {
+  const p = (g.archive_status ? g.archive_path || '' : g.install_dir || g.exe_path || '').trim();
   const m = /^([a-zA-Z]):/.exec(p);
-  return m ? m[1].toUpperCase() + ':' : null;
+  if (m) return m[1].toUpperCase() + ':';
+  // UNC 路径（如游戏压缩包存到 NAS：\\NAS\share\...）：按 UNC 根匹配到对应的网络映射盘，
+  // 否则归档到 NAS 的游戏会落到「未知」而不是它所在的映射盘卡片
+  if (p.startsWith('\\\\')) {
+    const lower = p.toLowerCase().replace(/\//g, '\\');
+    for (const v of volumes) {
+      const u = (v.unc || '').toLowerCase().replace(/\//g, '\\').replace(/\\+$/, '');
+      if (u && (lower === u || lower.startsWith(u + '\\'))) return v.drive;
+    }
+  }
+  return null;
 }
 
 // 大小计算路径：install_dir 即整个安装目录；否则用 exe_path 所在目录
@@ -80,6 +93,11 @@ function folderNameOf(g: Game): string {
 function targetPathOf(g: Game, targetDrive: string, steamLibPaths: string[]): string {
   const folder = folderNameOf(g);
   const drive = targetDrive.replace(/[\\/]+$/, '') + '\\';
+  // 已归档游戏移动的是压缩包本身：落到目标盘根目录、保留原文件名
+  if (g.archive_status) {
+    const base = (g.archive_path || '').split(/[\\/]/).filter(Boolean).pop() || `${g.name}.7z`;
+    return `${drive}${base}`;
+  }
   if (g.steam_appid > 0) {
     // 盘符匹配的已有库路径（后端已按 steam 根优先 + 只留仍存在的目录）
     const driveLetter = targetDrive.replace(':', '').toUpperCase();
@@ -95,9 +113,10 @@ function targetPathOf(g: Game, targetDrive: string, steamLibPaths: string[]): st
 
 export default function DiskManagerModal({ onClose }: Props) {
   const t = useT();
+  const modalRef = useDiskManagerLayout();
   const games = useAppStore((s) => s.games);
   const loadGames = useAppStore((s) => s.loadGames);
-  const [volumes, setVolumes] = useState<DiskVolume[]>([]);
+  const [volumes, setVolumes] = useState<DiskVolume[]>(api.getCachedDiskVolumes);
   const [sizes, setSizes] = useState<Record<string, number>>({});
   const [moves, setMoves] = useState<Record<string, MoveItem>>({});
   const [steamLibPaths, setSteamLibPaths] = useState<string[]>([]); // 已有 Steam 库路径（移动目标优先用它们）
@@ -128,12 +147,68 @@ export default function DiskManagerModal({ onClose }: Props) {
   // esc={!drag}：拖拽中按 Esc 只取消拖拽（onDragKeyDown），不顺手关掉整个弹窗。
   // 移动进行中禁止一切关闭（遮罩/叉/Esc/B）：取消只能走底部「取消移动」按钮，
   // 避免误关后进度显示丢失、几十 GB 复制在后台无人可见地继续
-  const guardedClose = () => { if (!applying) onClose(); };
+  const [archiveGame, setArchiveGame] = useState<Game | null>(null);
+  const [restoreGame, setRestoreGame] = useState<Game | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveMenu, setArchiveMenu] = useState<{ game: Game; x: number; y: number } | null>(null);
+  const [archiveMenuPos, setArchiveMenuPos] = useState({ left: 0, top: 0 });
+  const archiveMenuRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!archiveMenu || !archiveMenuRef.current) return;
+    const el = archiveMenuRef.current;
+    setArchiveMenuPos({
+      left: Math.max(8, Math.min(archiveMenu.x, window.innerWidth - el.offsetWidth - 8)),
+      top: Math.max(8, Math.min(archiveMenu.y, window.innerHeight - el.offsetHeight - 8)),
+    });
+    el.querySelector('button')?.focus();
+  }, [archiveMenu]);
+  useEffect(() => {
+    if (!archiveMenu) return;
+    const close = () => setArchiveMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [archiveMenu]);
+  const guardedClose = () => {
+    if (archiveMenu) { setArchiveMenu(null); return; }
+    if (!applying && !archiveBusy && !archiveGame && !restoreGame) onClose();
+  };
   useModalGamepad('modal:disk-manager', { onClose: guardedClose, esc: !drag });
 
-  // 拉取磁盘卷
+  // 磁盘管理「删除」：强删——已归档删 .7z，普通游戏删整个安装目录，再删库记录。二次确认后执行。
+  const handleDiskDelete = async (g: Game) => {
+    setArchiveMenu(null);
+    const target = (g.archive_status ? g.archive_path : g.install_dir) || '';
+    const ok = await confirm(
+      t(g.archive_status ? 'games.diskDeleteArchiveConfirm' : 'games.diskDeleteGameConfirm', { path: target }),
+      { title: `${t('games.deleteGame')} · ${g.name}`, kind: 'warning' },
+    );
+    if (!ok) return;
+    try {
+      await api.deleteGameAndFiles(g.id);
+      folderSizeGeneration++;
+      folderSizeCache.clear();
+      setSizes({});
+      await Promise.all([loadGames(), api.getDiskVolumes().then(setVolumes)]);
+    } catch (e: any) {
+      await message(t('games.diskDeleteFailed', { msg: typeof e === 'string' ? e : (e?.message ?? String(e)) }), { kind: 'error' });
+    }
+  };
+
+  // 先展示会话快照，卷容量后台刷新；关闭后忽略迟到的结果。
   useEffect(() => {
-    api.getDiskVolumes().then(setVolumes).catch((e) => setVolumeError(String(e)));
+    let cancelled = false;
+    api.preloadDiskVolumes()
+      .then((volumes) => { if (!cancelled) setVolumes(volumes); })
+      .catch((e) => { if (!cancelled) setVolumeError(String(e)); });
+    return () => { cancelled = true; };
   }, []);
 
   // 拉取已有 Steam 库路径（移动 Steam 游戏时优先落进目标盘的已有库）
@@ -161,14 +236,19 @@ export default function DiskManagerModal({ onClose }: Props) {
   // 同一会话内重开直接读缓存（游戏装卸后重启应用即重新计算，缓存只加速重复打开）
   useEffect(() => {
     let cancelled = false;
+    const generation = folderSizeGeneration;
     const jobs: { id: string; path: string }[] = [];
     for (const g of games) {
+      if (g.archive_status) {
+        setSizes((s) => ({ ...s, [g.id]: g.archive_size || 0 }));
+        continue;
+      }
       const p = sizePathOf(g);
       if (p) jobs.push({ id: g.id, path: p });
     }
     let i = 0;
     const worker = async () => {
-      while (i < jobs.length && !cancelled) {
+      while (i < jobs.length && !cancelled && generation === folderSizeGeneration) {
         const job = jobs[i++];
         const cached = folderSizeCache.get(job.path);
         if (cached !== undefined) {
@@ -176,8 +256,10 @@ export default function DiskManagerModal({ onClose }: Props) {
           continue;
         }
         const size = await api.getFolderSize(job.path).catch(() => 0);
-        folderSizeCache.set(job.path, size);
-        if (!cancelled) setSizes((s) => ({ ...s, [job.id]: size }));
+        if (!cancelled && generation === folderSizeGeneration) {
+          folderSizeCache.set(job.path, size);
+          setSizes((s) => ({ ...s, [job.id]: size }));
+        }
       }
     };
     // 并发 4 个 worker 逐个消费任务队列
@@ -218,11 +300,11 @@ export default function DiskManagerModal({ onClose }: Props) {
   const gamesByDrive = useMemo(() => {
     const map: Record<string, Game[]> = {};
     for (const g of games) {
-      const d = moves[g.id] ? moves[g.id].to : (driveOf(g) ?? 'UNKNOWN');
+      const d = moves[g.id] ? moves[g.id].to : (driveOf(g, volumes) ?? 'UNKNOWN');
       (map[d] ||= []).push(g);
     }
     return map;
-  }, [games, moves]);
+  }, [games, moves, volumes]);
 
   // 盘符不在当前卷列表里的游戏数（没读到的盘 / 无盘符路径）
   const unknownCount = useMemo(() => {
@@ -274,17 +356,17 @@ export default function DiskManagerModal({ onClose }: Props) {
 
   const handleDrop = (gameId: string, targetDrive: string) => {
     const g = games.find((x) => x.id === gameId);
-    if (!g) return;
-    // S1 防线：install_dir 为空的手动添加游戏无法安全移动（后端也会拒绝，
-    // 这里提前拦截并说明原因，而不是拖完点应用才报错）
-    if (!(g.install_dir || '').trim()) {
+    if (!g || archiveGame || archiveBusy || applying) return;
+    // S1 防线：无法安全移动的提前拦截（后端也会拒绝）。已归档按压缩包移动，需要 archive_path；
+    // 未归档按安装目录移动，需要 install_dir。
+    if (g.archive_status ? !(g.archive_path || '').trim() : !(g.install_dir || '').trim()) {
       void message(
         t('disk.noInstallDir', { name: g.name }),
         { title: t('disk.cannotMove'), kind: 'warning' },
       );
       return;
     }
-    const from = driveOf(g);                   // 原始归属盘（null = 无法判定，显示「未知」）
+    const from = driveOf(g, volumes);          // 原始归属盘（null = 无法判定，显示「未知」）
     const current = moves[gameId]?.to ?? from; // 当前显示盘（已移动过用目标盘）
     if (current === targetDrive) return;       // 还在原处，无意义
     setResults([]); // 开始新的迁移方案，清掉上一次的应用结果
@@ -324,7 +406,8 @@ export default function DiskManagerModal({ onClose }: Props) {
   };
 
   const handleCardPointerDown = (e: React.PointerEvent, g: Game) => {
-    if (applying) return; // 移动进行中禁止拖拽
+    if (applying || archiveGame || archiveBusy) return;
+    if (g.archive_status && !(g.archive_path || '').trim()) return; // 归档但无压缩包路径不可拖
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest('button')) return; // 撤销按钮不触发拖拽
     e.preventDefault(); // 防止图片原生拖拽/文本选择
@@ -384,7 +467,7 @@ export default function DiskManagerModal({ onClose }: Props) {
 
   // 应用迁移方案：确认 → 后端逐个移动（复制进度实时显示）→ 刷新数据
   const handleApply = async () => {
-    if (moveCount === 0 || applying) return;
+    if (moveCount === 0 || applying || archiveGame || archiveBusy) return;
     const ok = await confirm(
       t('disk.applyConfirmGames', { n: moveCount }),
       { title: t('disk.manage'), kind: 'warning' },
@@ -393,7 +476,7 @@ export default function DiskManagerModal({ onClose }: Props) {
     // M7：Steam 游戏的目标盘不在 Steam 库中 → 额外警告（不阻止，用户确认后仍可移动）
     const steamMoves = Object.values(moves).filter((m) => {
       const g = games.find((x) => x.id === m.gameId);
-      return g && (g.steam_appid ?? 0) > 0;
+      return g && !g.archive_status && (g.steam_appid ?? 0) > 0;
     });
     if (steamMoves.length > 0) {
       const steamLibs = new Set(await api.steamLibraryDrives().catch(() => []));
@@ -471,11 +554,12 @@ export default function DiskManagerModal({ onClose }: Props) {
   const draggedGame = drag ? games.find((g) => g.id === drag.id) : null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[300] flex items-center justify-center p-6" onClick={guardedClose}>
+    <div className="disk-manager-overlay fixed inset-0 z-[300] flex items-start justify-center px-6" onClick={guardedClose}>
       <div className="absolute inset-0 bg-black/75 backdrop-blur-md animate-fade-in" />
 
       <div
-        className="relative w-[94vw] max-w-6xl h-[90vh] glass-modal shadow-2xl animate-scale-in flex flex-col overflow-hidden"
+        ref={modalRef}
+        className="disk-manager-modal relative w-[94vw] max-w-6xl glass-modal shadow-2xl animate-scale-in flex flex-col overflow-visible"
         onClick={(e) => {
           e.stopPropagation();
           setShowDrivePanel(false); // 点击弹窗内面板外的任意处收起「显示卷」面板
@@ -561,7 +645,7 @@ export default function DiskManagerModal({ onClose }: Props) {
 
             <button
               onClick={guardedClose}
-              disabled={applying}
+              disabled={applying || archiveBusy || !!archiveGame}
               className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-white hover:bg-bg-surface-active transition-all disabled:opacity-40 disabled:hover:bg-transparent"
               title={applying ? t('disk.movingBusy') : t('common.close')}
             >
@@ -571,20 +655,20 @@ export default function DiskManagerModal({ onClose }: Props) {
         </div>
 
         {/* 磁盘卡网格 */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-6">
+        <div data-disk-body className="disk-manager-body shrink-0 min-h-0 p-6">
           {volumes.length === 0 && !volumeError ? (
-            <div className="h-full flex flex-col items-center justify-center gap-3 text-text-tertiary">
+            <div className="min-h-40 flex flex-col items-center justify-center gap-3 text-text-tertiary">
               <Loader2 size={28} className="animate-spin" />
               <span className="text-sm">{t('disk.loading')}</span>
             </div>
           ) : visibleVolumes.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
+            <div className="min-h-40 flex flex-col items-center justify-center gap-2 text-text-tertiary">
               <HardDrive size={28} className="opacity-40" />
               <span className="text-sm">{t('disk.allHidden')}</span>
               <button onClick={() => setShowDrivePanel(true)} className="text-xs text-[#00d4ff] hover:underline">{t('disk.clickToShow')}</button>
             </div>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5 content-start">
+            <div data-disk-grid className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5 content-start">
               {visibleVolumes.map((v) => {
                 const list = gamesByDrive[v.drive] || [];
                 const free = previewFree(v.drive);
@@ -603,7 +687,7 @@ export default function DiskManagerModal({ onClose }: Props) {
                   <div
                     key={v.drive}
                     ref={(el) => { volumeRefs.current[v.drive] = el; }}
-                    className={`glass-card p-5 flex flex-col hover:transform-none transition-all ${
+                    className={`disk-manager-card glass-card p-5 flex flex-col hover:transform-none ${
                       isDrop ? 'ring-2 ring-[#00d4ff]/70 border-[#00d4ff]/70' : ''
                     } ${over ? 'border-[#ef4444]/60' : ''}`}
                   >
@@ -656,49 +740,58 @@ export default function DiskManagerModal({ onClose }: Props) {
                       </div>
                     )}
 
-                    {/* 游戏列表（pr-2：卡片 hover 背景与右侧滚动条留出空隙，不蹭到） */}
-                    <div className={`flex-1 min-h-0 space-y-2 ${list.length ? 'max-h-72 overflow-y-auto pr-2' : ''}`}>
-                      {list.length === 0 && (
-                        <div className={`h-20 rounded-xl border border-dashed flex items-center justify-center text-xs transition-colors ${
-                          isDrop ? 'border-[#00d4ff]/60 text-[#00d4ff] bg-[rgba(0,212,255,0.05)]' : 'border-border-glass text-text-tertiary'
-                        }`}>
-                          {isDrop ? t('disk.dropHere') : t('disk.noneGames')}
-                        </div>
-                      )}
-                      {list.map((g) => {
-                        const isDragging = drag?.id === g.id && drag.active;
-                        const target = moves[g.id];
-                        const size = sizes[g.id];
-                        return (
-                          <div
-                            key={g.id}
-                            onPointerDown={(e) => handleCardPointerDown(e, g)}
-                            className={`group flex items-center gap-3 rounded-xl px-2.5 py-2 border cursor-grab active:cursor-grabbing transition-all hover:bg-bg-surface-active touch-none select-none ${
-                              isDragging ? 'opacity-40' : ''
-                            } ${target ? 'border-[#00d4ff]/40 bg-[rgba(0,212,255,0.06)]' : 'border-transparent'}`}
-                          >
-                            {g.cover_path ? (
-                              <img src={convertFileSrc(g.cover_path, 'covers')} className="w-10 h-[60px] rounded object-cover shrink-0 pointer-events-none" alt="" />
-                            ) : (
-                              <span className="w-10 h-[60px] rounded bg-gradient-to-br from-[#00d4ff]/18 to-bg-surface border border-border-glass flex items-center justify-center shrink-0 pointer-events-none">
-                                <Gamepad2 size={15} className="text-text-tertiary" />
-                              </span>
-                            )}
-                            <div className="min-w-0 flex-1 pointer-events-none">
-                              <p className="text-sm font-medium text-text-primary truncate">{g.name}</p>
-                              <p className="text-[11px] text-text-tertiary truncate mt-0.5">
-                                {size !== undefined ? fmtBytes(size) : t('disk.computing')}
-                                {target && <span className="text-[#00d4ff]"> · {t('disk.movingTo', { drive: target.to })}</span>}
-                              </p>
-                            </div>
-                            {target && (
-                              <button onClick={() => removeMove(g.id)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
-                                <XCircle size={16} />
-                              </button>
-                            )}
+                    {/* 游戏列表：内容先撑高卡片，达到可用高度后才滚动 */}
+                    <div data-disk-list className="disk-manager-list disk-scroll-y flex-1 min-h-0">
+                      <div data-disk-content className="space-y-2">
+                        {list.length === 0 && (
+                          <div className={`h-20 rounded-xl border border-dashed flex items-center justify-center text-xs transition-colors ${
+                            isDrop ? 'border-[#00d4ff]/60 text-[#00d4ff] bg-[rgba(0,212,255,0.05)]' : 'border-border-glass text-text-tertiary'
+                          }`}>
+                            {isDrop ? t('disk.dropHere') : t('disk.noneGames')}
                           </div>
-                        );
-                      })}
+                        )}
+                        {list.map((g) => {
+                          const isDragging = drag?.id === g.id && drag.active;
+                          const target = moves[g.id];
+                          const size = g.archive_status ? g.archive_size || 0 : sizes[g.id];
+                          return (
+                            <div
+                              key={g.id}
+                              onPointerDown={(e) => handleCardPointerDown(e, g)}
+                              onContextMenu={(e) => {
+                                e.preventDefault(); e.stopPropagation();
+                                if (applying || archiveBusy || archiveGame || drag?.active) return;
+                                setArchiveMenu({ game: g, x: e.clientX, y: e.clientY });
+                              }}
+                              title={g.archive_status ? `${g.archive_path || ''}\n${g.archive_status === 'cleanup_pending' ? t('games.archiveLeftoverWarning') : t('games.archiveCannotLaunch')}` : undefined}
+                              className={`group flex items-center gap-3 rounded-xl px-2.5 py-2 border ${(g.archive_status && !(g.archive_path || '').trim()) ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'} transition-all hover:bg-bg-surface-active touch-none select-none ${
+                                isDragging ? 'opacity-40' : ''
+                              } ${target ? 'border-[#00d4ff]/40 bg-[rgba(0,212,255,0.06)]' : 'border-transparent'}`}
+                            >
+                              {g.cover_path ? (
+                                <img src={convertFileSrc(g.cover_path, 'covers')} className="w-10 h-[60px] rounded object-cover shrink-0 pointer-events-none" alt="" />
+                              ) : (
+                                <span className="w-10 h-[60px] rounded bg-gradient-to-br from-[#00d4ff]/18 to-bg-surface border border-border-glass flex items-center justify-center shrink-0 pointer-events-none">
+                                  <Gamepad2 size={15} className="text-text-tertiary" />
+                                </span>
+                              )}
+                              <div className="min-w-0 flex-1 pointer-events-none">
+                                <p className="text-sm font-medium text-text-primary truncate">{g.name}</p>
+                                <p className="text-[11px] text-text-tertiary truncate mt-0.5">
+                                  {size !== undefined ? fmtBytes(size) : t('disk.computing')}
+                                  {g.archive_status && <span className="text-amber-400"> · {t(g.archive_status === 'cleanup_pending' ? 'games.archiveLeftover' : 'games.archived')}</span>}
+                                  {target && <span className="text-[#00d4ff]"> · {t('disk.movingTo', { drive: target.to })}</span>}
+                                </p>
+                              </div>
+                              {target && (
+                                <button onClick={() => removeMove(g.id)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
+                                  <XCircle size={16} />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 );
@@ -709,35 +802,37 @@ export default function DiskManagerModal({ onClose }: Props) {
 
         {/* 待移动方案列表（纵向排列，每行完整可见） */}
         {moveCount > 0 && !applying && results.length === 0 && (
-          <div className="shrink-0 border-t border-border-glass px-6 pt-3 pb-2">
-            <div className="flex items-center justify-between mb-2">
+          <div data-disk-queue className="disk-manager-queue shrink-0 min-h-0 flex flex-col border-t border-border-glass px-6 pt-3 pb-2">
+            <div className="shrink-0 flex items-center justify-between mb-2">
               <p className="text-xs font-medium text-text-secondary">{t('disk.plans')}</p>
               <span className="text-[11px] text-text-tertiary">{t('disk.plansSummaryGames', { n: moveCount })}</span>
             </div>
-            <div className="disk-scroll-y max-h-44 overflow-y-auto space-y-1.5 pr-1">
-              {Object.values(moves).map((m) => (
-                <div key={m.gameId} className="flex items-center gap-3 rounded-xl px-3 py-2 bg-[rgba(0,212,255,0.05)] border border-[rgba(0,212,255,0.15)]">
-                  <span className="shrink-0 w-9 h-9 rounded-lg bg-bg-surface border border-border-glass flex items-center justify-center text-xs font-bold text-text-secondary">
-                    {m.from === 'UNKNOWN' ? t('disk.unknownDrive') : m.from.replace(':', '')}
-                  </span>
-                  <ArrowRight size={12} className="shrink-0 text-[#00d4ff]" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-text-primary truncate leading-tight">
-                      {m.name}
-                      <span className="ml-1.5 text-xs font-normal text-text-tertiary">{fmtBytes(m.size)}</span>
-                    </p>
-                    <p className="text-[11px] font-mono text-[#00d4ff] truncate leading-tight mt-0.5" title={m.targetPath}>{m.targetPath}</p>
+            <div data-disk-list className="disk-manager-list disk-scroll-y min-h-0 flex-1">
+              <div data-disk-content className="space-y-1.5">
+                {Object.values(moves).map((m) => (
+                  <div key={m.gameId} className="flex items-center gap-3 rounded-xl px-3 py-2 bg-[rgba(0,212,255,0.05)] border border-[rgba(0,212,255,0.15)]">
+                    <span className="shrink-0 w-9 h-9 rounded-lg bg-bg-surface border border-border-glass flex items-center justify-center text-xs font-bold text-text-secondary">
+                      {m.from === 'UNKNOWN' ? t('disk.unknownDrive') : m.from.replace(':', '')}
+                    </span>
+                    <ArrowRight size={12} className="shrink-0 text-[#00d4ff]" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-text-primary truncate leading-tight">
+                        {m.name}
+                        <span className="ml-1.5 text-xs font-normal text-text-tertiary">{fmtBytes(m.size)}</span>
+                      </p>
+                      <p className="text-[11px] font-mono text-[#00d4ff] truncate leading-tight mt-0.5" title={m.targetPath}>{m.targetPath}</p>
+                    </div>
+                    <button onClick={() => removeMove(m.gameId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
+                      <XCircle size={16} />
+                    </button>
                   </div>
-                  <button onClick={() => removeMove(m.gameId)} className="shrink-0 text-text-tertiary hover:text-[#ef4444]" title={t('disk.undoMove')}>
-                    <XCircle size={16} />
-                  </button>
-                </div>
-              ))}
-              {unknownCount > 0 && (
-                <div className="flex items-center gap-1.5 text-[11px] text-amber-500 px-1 pt-0.5">
-                  <AlertTriangle size={12} /> {t('disk.unknownGames', { n: unknownCount })}
-                </div>
-              )}
+                ))}
+                {unknownCount > 0 && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-amber-500 px-1 pt-0.5">
+                    <AlertTriangle size={12} /> {t('disk.unknownGames', { n: unknownCount })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -772,16 +867,21 @@ export default function DiskManagerModal({ onClose }: Props) {
                   {results.map((r) => (
                     <span
                       key={r.gameId}
-                      title={r.error ?? undefined}
+                      title={r.warning ?? r.error ?? undefined}
                       className={`shrink-0 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border max-w-lg ${
-                        r.ok
+                        r.ok && r.warning
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
+                          : r.ok
                           ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
                           : 'bg-[#ef4444]/10 border-[#ef4444]/30 text-[#ef4444]'
                       }`}
                     >
-                      {r.ok ? <Check size={12} className="shrink-0" /> : <AlertTriangle size={12} className="shrink-0" />}
+                      {r.ok && !r.warning ? <Check size={12} className="shrink-0" /> : <AlertTriangle size={12} className="shrink-0" />}
                       <span className="truncate min-w-0">{r.name || t('disk.unknownGame')}</span>
-                      {r.ok ? t('disk.moved') : (
+                      {r.ok ? (
+                        // 移动成功：源被占用未删净时显警告标签，完整说明在 title 悬浮
+                        <span className="truncate">{r.warning ? t('disk.movedLeftover') : t('disk.moved')}</span>
+                      ) : (
                         <span className="truncate">
                           {/* 取消/拒绝的长文本（含细节）放 title，chip 内截断不溢出 */}
                           {(r.error ?? '').includes('移动已取消')
@@ -826,13 +926,13 @@ export default function DiskManagerModal({ onClose }: Props) {
                   {cancelling ? <><Loader2 size={14} className="animate-spin" />{t('disk.cancelling')}</> : t('disk.cancelMove')}
                 </button>
               ) : (
-                <button onClick={onClose} className="btn btn-ghost px-4 py-2 text-sm disabled:opacity-50">
+                <button onClick={guardedClose} disabled={archiveBusy || !!archiveGame} className="btn btn-ghost px-4 py-2 text-sm disabled:opacity-50">
                   {t('common.cancel')}
                 </button>
               )}
               <button
                 onClick={handleApply}
-                disabled={moveCount === 0 || applying}
+                disabled={moveCount === 0 || applying || archiveBusy || !!archiveGame}
                 className="btn btn-accent px-5 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {applying ? <><Loader2 size={14} className="animate-spin" />{t('disk.applying')}</> : <><Check size={14} />{t('disk.apply', { n: moveCount })}</>}
@@ -841,6 +941,44 @@ export default function DiskManagerModal({ onClose }: Props) {
           </div>
         </div>
       </div>
+
+      {archiveMenu && (
+        <div ref={archiveMenuRef} className="fixed z-[310] glass-card w-44 py-1.5 shadow-2xl animate-scale-in"
+          style={archiveMenuPos} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setArchiveMenu(null); } }}>
+          {archiveMenu.game.archive_status ? (
+            <button className="context-menu-item disabled:opacity-40" disabled={!archiveMenu.game.archive_path?.trim()}
+              onClick={() => { setRestoreGame(archiveMenu.game); setArchiveMenu(null); }}>
+              {t('games.restore')}
+            </button>
+          ) : (
+            <button className="context-menu-item disabled:opacity-40" disabled={!!moves[archiveMenu.game.id] || !archiveMenu.game.install_dir?.trim()}
+              title={moves[archiveMenu.game.id] ? t('games.archiveUndoMove') : undefined}
+              onClick={() => { setArchiveGame(archiveMenu.game); setArchiveMenu(null); }}>
+              {t('games.compress')}
+            </button>
+          )}
+          <div className="context-menu-divider" />
+          <button className="context-menu-item text-danger"
+            onClick={() => handleDiskDelete(archiveMenu.game)}>
+            {t('games.deleteGame')}
+          </button>
+        </div>
+      )}
+      {archiveGame && <GameArchiveDialog game={archiveGame} size={sizes[archiveGame.id]} onClose={() => setArchiveGame(null)}
+        onBusy={setArchiveBusy} onRefresh={async () => {
+          folderSizeGeneration++;
+          folderSizeCache.clear();
+          setSizes({});
+          await Promise.all([loadGames(), api.getDiskVolumes().then(setVolumes)]);
+        }} />}
+      {restoreGame && <GameRestoreDialog game={restoreGame} onClose={() => setRestoreGame(null)}
+        onBusy={setArchiveBusy} onRefresh={async () => {
+          folderSizeGeneration++;
+          folderSizeCache.clear();
+          setSizes({});
+          await Promise.all([loadGames(), api.getDiskVolumes().then(setVolumes)]);
+        }} />}
 
       {/* 拖拽克隆：跟随指针 */}
       {drag?.active && draggedGame && createPortal(
@@ -859,7 +997,7 @@ export default function DiskManagerModal({ onClose }: Props) {
             <div className="min-w-0">
               <p className="text-sm font-medium text-text-primary truncate">{draggedGame.name}</p>
               <p className="text-[11px] text-text-tertiary truncate mt-0.5">
-                {driveOf(draggedGame) ?? t('disk.unknownDrive')} · {sizes[draggedGame.id] !== undefined ? fmtBytes(sizes[draggedGame.id]) : t('disk.computing')}
+                {driveOf(draggedGame, volumes) ?? t('disk.unknownDrive')} · {sizes[draggedGame.id] !== undefined ? fmtBytes(sizes[draggedGame.id]) : t('disk.computing')}
               </p>
             </div>
           </div>
@@ -868,5 +1006,130 @@ export default function DiskManagerModal({ onClose }: Props) {
       )}
     </div>,
     document.body,
+  );
+}
+
+function GameArchiveDialog({ game, size, onClose, onBusy, onRefresh }: {
+  game: Game; size?: number; onClose: () => void; onBusy: (busy: boolean) => void; onRefresh: () => Promise<void>;
+}) {
+  const t = useT();
+  const source = game.install_dir.replace(/[\\/]+$/, '');
+  const [path, setPath] = useState(`${source}.7z`);
+  const [level, setLevel] = useState<1 | 5 | 9>(5);
+  const [busy, setBusy] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [progress, setProgress] = useState<api.GameArchiveProgress | null>(null);
+  const [result, setResult] = useState<api.GameArchiveResult | null>(null);
+  const [error, setError] = useState('');
+  const busyRef = useRef(false);
+  const invokedRef = useRef(false);
+  const mounted = useRef(true);
+  const unlistenRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; unlistenRef.current?.(); unlistenRef.current = null; };
+  }, []);
+  const close = () => { if (!busyRef.current && !choosing) onClose(); };
+  useModalGamepad('modal:game-archive', { onClose: close });
+  const browse = async () => {
+    setChoosing(true);
+    try {
+      const selected = await save({ defaultPath: path, filters: [{ name: '7-Zip', extensions: ['7z'] }] });
+      if (selected && mounted.current) { setPath(selected); }
+    } catch (err) { if (mounted.current) setError(String(err)); }
+    finally { if (mounted.current) setChoosing(false); }
+  };
+  const start = async () => {
+    if (busyRef.current || !path.trim() || choosing) return;
+    busyRef.current = true;
+    onBusy(true);
+    setBusy(true); setError(''); setResult(null); setCancelling(false);
+    setProgress({ gameId: game.id, phase: 'preparing', percent: 0 });
+    try {
+      const stop = await listen<api.GameArchiveProgress>('game-archive-progress', (event) => {
+        if (mounted.current && event.payload.gameId === game.id) setProgress(event.payload);
+      });
+      if (!mounted.current) { stop(); return; }
+      unlistenRef.current = stop;
+      invokedRef.current = true;
+      const res = await api.compressGame(game.id, path.trim(), level);
+      if (mounted.current) setResult(res);
+    } catch (err) {
+      if (mounted.current) setError(String(err));
+    } finally {
+      unlistenRef.current?.(); unlistenRef.current = null;
+      invokedRef.current = false;
+      try { await onRefresh(); }
+      catch (err) { if (mounted.current) setError((old) => [old, t('games.archiveRefreshFailed', { msg: String(err) })].filter(Boolean).join('\n')); }
+      busyRef.current = false;
+      onBusy(false);
+      if (mounted.current) { setBusy(false); setCancelling(false); }
+    }
+  };
+  const cancel = async () => {
+    if (!busyRef.current || !invokedRef.current || cancelling || progress?.phase === 'cleaning') return;
+    setCancelling(true);
+    try { await api.cancelGameArchive(); }
+    catch (err) { if (mounted.current) { setCancelling(false); setError(String(err)); } }
+  };
+  return createPortal(
+    <div className="fixed inset-0 z-[320] flex items-center justify-center p-6" onClick={(e) => { e.stopPropagation(); close(); }}>
+      <div className="absolute inset-0 bg-black/75 backdrop-blur-md" />
+      <div role="dialog" aria-modal="true" aria-labelledby="game-archive-title" className="relative glass-modal solid-modal w-[640px] max-w-full max-h-[85vh] overflow-y-auto p-6 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="game-archive-title" className="text-lg font-bold">{t('games.compress')} · {game.name}</h2>
+          <button onClick={close} disabled={busy || choosing} className="btn btn-ghost disabled:opacity-40" aria-label={t('common.close')}><X size={18} /></button>
+        </div>
+        <div className="text-xs text-text-secondary space-y-1 break-all">
+          <p>{t('games.installDir')} · {size === undefined ? t('disk.computing') : fmtBytes(size)}</p>
+          <p className="text-text-primary select-text">{source}</p>
+        </div>
+        {!result && <>
+          <div className="space-y-1.5">
+            <span className="block text-xs font-medium text-text-secondary">{t('games.archiveDestination')}</span>
+            <div className="flex gap-2">
+              <input className="input flex-1 min-w-0 text-xs" value={path} onChange={(e) => setPath(e.target.value)} disabled={busy || choosing} />
+              <button className="btn btn-ghost text-xs" onClick={browse} disabled={busy || choosing}>{t('common.browse')}</button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <span className="block text-xs font-medium text-text-secondary">{t('games.archiveLevel')}</span>
+            <div className="flex gap-2">
+              {([[1, 'games.archiveFast'], [5, 'games.archiveBalanced'], [9, 'games.archiveMaximum']] as const).map(([lv, key]) => (
+                <button
+                  key={lv}
+                  type="button"
+                  disabled={busy}
+                  className={['chip', 'disabled:opacity-40', level === lv && 'active'].filter(Boolean).join(' ')}
+                  onClick={() => setLevel(lv)}
+                >
+                  {t(key)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>}
+        {busy && progress && <div className="space-y-2 text-sm" role="status">
+          <p className="flex items-center gap-2"><Loader2 size={15} className="animate-spin" />{t(`games.archivePhase.${progress.phase}`)} · {Math.round(Math.max(0, Math.min(100, progress.percent || 0)))}%</p>
+          <p className="text-xs text-text-secondary">{t('games.archiveBusy')}</p>
+        </div>}
+        {result && <div className="rounded-xl border border-border-glass p-4 space-y-2 text-sm break-all select-text">
+          <p className={result.warning ? 'text-amber-400 font-semibold' : 'text-emerald-400 font-semibold'}>{t(result.warning ? 'games.archiveLeftover' : 'games.archiveComplete')}</p>
+          <p>{result.archivePath}</p>
+          <p>{t('games.archiveResultSize', { size: fmtBytes(result.archiveSize), original: fmtBytes(result.originalSize) })}</p>
+          {!result.warning && <p>{t('games.archiveReleased', { size: fmtBytes(Math.max(0, result.originalSize - result.archiveSize)) })}</p>}
+          {result.warning && <p className="text-amber-400 whitespace-pre-wrap">{t('games.archiveLeftoverWarning')}<br />{result.warning}</p>}
+        </div>}
+        {error && <p role="alert" className="text-sm text-red-400 whitespace-pre-wrap break-all select-text">{error}</p>}
+        <div className="flex justify-end gap-3">
+          {busy ? <button className="btn btn-ghost text-sm disabled:opacity-40" onClick={cancel} disabled={cancelling || progress?.phase === 'cleaning'}>{t(cancelling ? 'disk.cancelling' : 'common.cancel')}</button>
+            : <>
+              <button className="btn btn-ghost text-sm" onClick={close} disabled={choosing}>{t('common.close')}</button>
+              {!result && <button className="btn btn-accent text-sm disabled:opacity-40" onClick={start} disabled={!path.trim() || choosing}>{t('games.archiveStart')}</button>}
+            </>}
+        </div>
+      </div>
+    </div>, document.body,
   );
 }

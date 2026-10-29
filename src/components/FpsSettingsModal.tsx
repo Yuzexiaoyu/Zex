@@ -205,11 +205,16 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
     }
   }, []);
 
-  useEffect(() => {
+  // RTSS 是开关落盘后按需拉起/销毁的（后台要一两秒），状态行靠补刷跟上
+  const refreshRtss = useCallback(() => {
     api.rtssStatus().then((s) => setRtss({ installed: s.installed, running: s.running })).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshRtss();
     api.rtssDefaultProfile().then(setDefaults).catch(() => {});
     void reloadTargets();
-  }, [reloadTargets]);
+  }, [reloadTargets, refreshRtss]);
 
   // 切换配置对象就整份重读（profile 文件是唯一真相，没有本地缓存要同步）。
   // 只依赖 targetId：targets 刷新不该触发重读，否则刚落盘的改动会被这次异步读回来的
@@ -230,9 +235,14 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
     setCfg(merged);
     api
       .rtssWriteProfile(targetId, merged)
-      // 每次落盘都刷新 targets 列表：任何改动都可能翻转该游戏「与全局相同」的判定，
-      // 「单独设置」角标和「恢复跟随全局」按钮的显隐都依赖列表里的 same_as_global
-      .then(() => reloadTargets())
+      .then(() => {
+        // 每次落盘都刷新 targets 列表：任何改动都可能翻转该游戏「与全局相同」的判定，
+        // 「单独设置」角标和「恢复跟随全局」按钮的显隐都依赖列表里的 same_as_global。
+        // RTSS 生死跟着这次落盘变（后台拉起要一两秒），状态行补刷两次
+        void reloadTargets();
+        refreshRtss();
+        window.setTimeout(refreshRtss, 2500);
+      })
       .catch(fail);
   };
 
@@ -240,8 +250,11 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
     try {
       await api.rtssClearProfile(targetId);
       await reloadTargets();
-      // profile 没了，显示的值要换回全局那份
+      // profile 没了，显示的值要换回全局那份；这可能是最后一个「想用」的对象，
+      // RTSS 会被收掉，状态行也要跟着变
       setCfg(await api.rtssReadProfile(targetId));
+      refreshRtss();
+      window.setTimeout(refreshRtss, 2500);
     } catch (e) {
       fail(e);
     }
@@ -447,7 +460,7 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
                     onPick={(v) => patch({ coordinate_space: v })}
                   />
                 </Row>
-                <Row label={t('settings.rtssOsdGraph')} desc={t('settings.rtssOsdGraphDesc')}>
+                <Row label={t('settings.rtssOsdGraph')}>
                   <Toggle t={t} value={cfg.graph_enabled} onPick={(v) => patch({ graph_enabled: v })} />
                 </Row>
                 {cfg.graph_enabled && (

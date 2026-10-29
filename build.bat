@@ -19,6 +19,16 @@ echo.
 call npx tauri build --debug --no-bundle
 if errorlevel 1 goto :failed
 
+REM Link the runtime components (mpv / RTSS / player skin / folder cover presets) next to
+REM the debug exe. The dev-tree fallback is gone - resolve_mpv / resolve_rtss / resolve_skin /
+REM resolve_folder_covers now only look beside the exe, exactly like the shipped portable
+REM layout. Junctions cost nothing (no copy, no admin rights) and are rebuilt after a cargo clean.
+for %%D in (mpv rtss skin folder-covers) do (
+    if not exist "src-tauri\target\debug\%%D" (
+        mklink /J "src-tauri\target\debug\%%D" "src-tauri\%%D" >nul 2>&1
+    )
+)
+
 echo.
 echo Build complete! Run start.bat to launch.
 pause

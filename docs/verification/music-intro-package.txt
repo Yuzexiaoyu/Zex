@@ -1,0 +1,18 @@
+== 使用现有构建产物：D:\ZEX\src-tauri\target\release\zex.exe
+== 补签主程序 ==
+Done Adding Additional Store
+Successfully signed: D:\ZEX\src-tauri\target\release\zex.exe
+
+补签完成：D:\ZEX\src-tauri\target\release\zex.exe
+  发布者: CN=ZEX
+  状态  : Valid（UnknownError=链停在自签根，用户导入后即 Valid）
+  时间戳: True
+
+== 压缩包内容及签名校验 ==
+  ZEX.exe        Valid  (CN=ZEX)
+  mpv\mpv.exe       112.1 MB
+  rtss\RTSS.exe       0.5 MB
+  skin\scripts        0.3 MB
+  folder-covers       1.7 MB
+
+打包完成：D:\ZEX\release\ZEX-0.1.0.zip（60.2 MB）

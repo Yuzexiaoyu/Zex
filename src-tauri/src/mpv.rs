@@ -34,6 +34,8 @@ const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 const TICK_GAP_MAX: f64 = 2.0;
 // 看到这个比例之后退出，就算作看完（片尾曲通常不会看到最后一秒）
 const WATCHED_THRESHOLD: f64 = 0.92;
+// mpv 输入节默认鼠标区域覆盖整屏；手柄节不应阻止光标隐藏和窗口拖动。
+const GAMEPAD_SECTION_FLAGS: &str = "allow-hide-cursor+allow-vo-dragging";
 
 // ─────────────────────────────────────────────
 // 会话状态
@@ -115,9 +117,11 @@ struct ProgressPayload {
 // mpv 可执行文件与配置
 // ─────────────────────────────────────────────
 
-/// 找 mpv.exe。三个候选按可靠性排序 —— `tauri build --no-bundle`（start.bat 走的就是
-/// 这条）不会把资源复制到 exe 旁边，所以必须有开发树兜底。
-/// 结构：mpv 平铺在 exe 同级（便携布局，无 resources/ 中间层）
+/// 找 mpv.exe。两处候选：Tauri Resource 基目录 → ZEX.exe 同级的 mpv\。
+/// 结构：mpv 平铺在 exe 同级（便携布局，无 resources/ 中间层）。
+/// 开发树兜底（CARGO_MANIFEST_DIR 绝对路径）已移除，原因见 rtss.rs 的 resolve_rtss；
+/// `tauri build --no-bundle`（build.bat 走这条）不复制资源，改由 build.bat 在
+/// target\debug 旁建目录联接补齐。
 fn resolve_mpv(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(p) = app
         .path()
@@ -135,14 +139,11 @@ fn resolve_mpv(app: &AppHandle) -> Option<PathBuf> {
             }
         }
     }
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("mpv")
-        .join("mpv.exe");
-    dev.exists().then_some(dev)
+    None
 }
 
 /// 找播放器皮肤资源目录（scripts/、fonts/、script-opts/ 三个子目录同构镜像）。
-/// 和 resolve_mpv 同一套查找顺序：Resource 基目录 → exe 旁 → 开发树兜底。
+/// 和 resolve_mpv 同一套查找顺序：Resource 基目录 → exe 旁，同样没有开发树兜底。
 /// 皮肤用的是 ModernZ（一体式单栏控制条 + 中文界面），脚本随 ZEX 锁版本
 fn resolve_skin(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(p) = app
@@ -161,9 +162,7 @@ fn resolve_skin(app: &AppHandle) -> Option<PathBuf> {
             }
         }
     }
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("skin");
-    dev.exists().then_some(dev)
+    None
 }
 
 /// 递归复制目录。单个文件失败只跳过不中断 —— 皮肤这种可选资产不值得整体回滚
@@ -200,7 +199,7 @@ fn ensure_config_dir(app: &AppHandle, data_dir: &PathBuf) -> PathBuf {
     // mpv 会从 <config>/fonts 自动注册字体、<config>/scripts 自动加载脚本，
     // 所以把随包资源复制进配置目录即可生效。用版本标记文件判断要不要重灌：
     // 脚本随 ZEX 锁版本，升级时整包覆盖；复制失败只影响皮肤，自带 OSC 兜底
-    const SKIN_VERSION: &str = "modernz 2026-08-09 v59"; // v59: 抽屉开着时回读边车（已看勾实时刷新）
+    const SKIN_VERSION: &str = "modernz 2026-10-06 v63"; // v63: 手柄与播放列表键盘输入节允许自动隐藏光标
     let marker = dir.join(".skin-version");
     let need_install = std::fs::read_to_string(&marker).ok().as_deref() != Some(SKIN_VERSION);
     if need_install {
@@ -217,13 +216,37 @@ fn ensure_config_dir(app: &AppHandle, data_dir: &PathBuf) -> PathBuf {
         }
     }
 
-    // ── input.conf：单击视频暂停/继续（双击全屏保持 mpv 默认），Esc 关闭播放器 ──
+    // ── input.conf：单击视频暂停/继续（双击全屏保持 mpv 默认），滚轮/↑↓ 调音量，Esc 关闭播放器 ──
     // 缺失或空文件都补写；用户自己填过内容就尊重
     // Esc=quit 与 ModernZ 皮肤不冲突：播放列表抽屉开着时皮肤用 forced section 劫持 Esc
     // （先关抽屉），关抽屉后按键归还，Esc 才会落到这里关闭播放器
     const ESC_BIND: &str = "# Esc = 关闭播放器（等效在播放器窗口点叉）；播放列表抽屉开着时 Esc 先关抽屉\nESC quit\n";
     const TAB_BIND: &str = "# Tab = 打开/关闭统计信息（皮肤里的统计按钮已去掉）\nTab script-binding stats/display-stats-toggle\n";
     const F_KEY_BIND: &str = "# mpv 默认 f 键切换全屏，ZEX 固定全屏播放，禁用\nf ignore\n";
+    // 键盘 ↑/↓ 调音量，和滚轮完全同构：no-osd 不弹 mpv 中央音量条，提示只走左上角的
+    // volume_osd.lua。顺带把 mpv 默认带中央音量条的 9/0 与 / *（含小键盘）一并改成
+    // no-osd ±5，键盘的音量入口全部统一。被覆盖的 mpv 默认：↑↓ = ±60 秒跳转、9/0 = ±2。
+    // 播放列表抽屉开着时 ↑/↓ 由皮肤 forced section 接管做列表导航，关抽屉后才回到调音量
+    const KBD_VOLUME_BIND: &str = "# 键盘 ↑/↓ 与 9/0、/ * = 音量 ±5（同滚轮：no-osd，提示只走左上角）\n\
+         # 覆盖 mpv 默认的 ↑↓ = ±60 秒跳转、9/0 = ±2（带中央音量条）\n\
+         UP no-osd add volume 5\n\
+         DOWN no-osd add volume -5\n\
+         9 no-osd add volume -5\n\
+         0 no-osd add volume 5\n\
+         / no-osd add volume -5\n\
+         * no-osd add volume 5\n\
+         KP_DIVIDE no-osd add volume -5\n\
+         KP_MULTIPLY no-osd add volume 5\n";
+    // ←/→ 快退快进不弹 mpv 中央那条 OSD 进度条（no-osd），进度看控制栏就够。
+    // 同一条中央进度条还会被 Shift+PgUp/PgDn（±10 分钟）和 Home（回开头）触发，一并压掉；
+    // 章节切换（PgUp/PgDn）弹的是文字不是条子，保持 mpv 默认
+    const SEEK_NOOSD_BIND: &str = "# ←/→ = 快退/快进 5 秒（no-osd：不弹中央那条进度条，进度看控制栏）\n\
+         # Shift+PgUp/PgDn = ±10 分钟、Home = 回开头，同样不弹中央进度条\n\
+         LEFT no-osd seek -5\n\
+         RIGHT no-osd seek 5\n\
+         Shift+PGUP no-osd seek 600\n\
+         Shift+PGDWN no-osd seek -600\n\
+         HOME no-osd seek 0 absolute\n";
     // Xbox 手柄（--input-gamepad=yes 启用）：主机风格映射。GAMEPAD_ACTION_* = A/B/X/Y
     //（DOWN=A, RIGHT=B, LEFT=X, UP=Y，XInput 方向命名）。未用的键显式 ignore，
     // 避免 mpv 内置默认手柄绑定抢键。mpv 手柄键是纯数字量，扳机/摇杆只能当按钮
@@ -265,10 +288,12 @@ fn ensure_config_dir(app: &AppHandle, data_dir: &PathBuf) -> PathBuf {
              # mpv 默认 f 键切换全屏，ZEX 固定全屏播放，禁用\n\
              f ignore\n"
             .to_string();
+        fresh.push_str(KBD_VOLUME_BIND);
+        fresh.push_str(SEEK_NOOSD_BIND);
         fresh.push_str(GAMEPAD_BIND);
         let _ = std::fs::write(&input_conf, fresh);
     } else if let Some(text) = existing {
-        // 老版本 ZEX 写的 input.conf 缺 Esc / Tab / f ignore / 手柄绑定：认准 ZEX 标记行才补，用户自写的文件不碰
+        // 老版本 ZEX 写的 input.conf 缺 Esc / Tab / f ignore / 键盘音量 / 手柄绑定：认准 ZEX 标记行才补，用户自写的文件不碰
         // GAMEPAD 段升级判定：任一旧版绑定特征（D-pad 换集/带 !、X=show-playlist、LT/RT=seek）→ 替换整段
         let stale_gampad = |t: &str| {
             // 缺 {gamepad} 输入节 = 旧版绑定（音乐播放无法屏蔽手柄），一律更新为新格式
@@ -283,6 +308,8 @@ fn ensure_config_dir(app: &AppHandle, data_dir: &PathBuf) -> PathBuf {
             && (!text.contains("ESC quit")
                 || !text.contains("script-binding stats/display-stats-toggle")
                 || !text.contains("f ignore")
+                || !text.contains("\nUP no-osd add volume")
+                || !text.contains("\nLEFT no-osd seek")
                 || !text.contains("GAMEPAD_ACTION_DOWN")
                 || stale_gampad(&text))
         {
@@ -308,6 +335,14 @@ fn ensure_config_dir(app: &AppHandle, data_dir: &PathBuf) -> PathBuf {
             if !out.contains("f ignore") {
                 out.push_str("\n");
                 out.push_str(F_KEY_BIND);
+            }
+            if !out.contains("\nUP no-osd add volume") {
+                out.push_str("\n");
+                out.push_str(KBD_VOLUME_BIND);
+            }
+            if !out.contains("\nLEFT no-osd seek") {
+                out.push_str("\n");
+                out.push_str(SEEK_NOOSD_BIND);
             }
             if !out.contains("GAMEPAD_ACTION_DOWN") {
                 out.push_str("\n");
@@ -627,25 +662,44 @@ fn quit_pipe(pipe: &str) {
     }
 }
 
-/// 判断进程是不是随包 mpv。
+/// mpv 路径规整：小写 + 正斜杠 + 去掉 \\?\ 长路径前缀，供全路径比对
+fn norm_mpv_path(s: &str) -> String {
+    let p = s.to_ascii_lowercase().replace('\\', "/");
+    p.trim_start_matches("//?/").to_string()
+}
+
+/// ZEX 随包 mpv 的规整绝对路径：锚定 ZEX 自身 exe 所在目录（开发树 / target /
+/// 便携版都是 <ZEX exe 同级>/mpv/mpv.exe，与 resolve_mpv 的 current_exe 兜底同源）。
+/// 只算一次。取不到自身路径时返回 None，调用方退回后缀匹配兜底。
+fn zex_mpv_path() -> &'static Option<String> {
+    static P: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    P.get_or_init(|| {
+        let exe = std::env::current_exe().ok()?;
+        let p = exe.parent()?.join("mpv").join("mpv.exe");
+        Some(norm_mpv_path(&p.to_string_lossy()))
+    })
+}
+
+/// 判断进程是不是 ZEX 随包 mpv。
 ///
 /// ⚠️ 不能用命令行匹配：这台机器上 sysinfo 的 process.cmd() 全部返回空（Windows
 /// 屏蔽了 PEB 命令行读取，实测 251 个进程全空），按 cmdline 判「含 zex-mpv」永远
-/// 不命中 → 杀进程/数进程全部静默失效，退出时 mpv 没等退完就 app.exit（闪屏根因）。
-/// 改用 exe() 路径（Toolhelp32 提供，实测正常）：随包播放器无论开发树、target
-/// debug 还是便携版，路径都以 mpv/mpv.exe 结尾；用户自己的 mpv 不会误伤
+/// 不命中 → 杀进程/数进程全部静默失效。只能用 exe() 路径（Toolhelp32 提供）。
+///
+/// 但不能只看「以 mpv/mpv.exe 结尾」：用户自己装在 C:\mpv\mpv.exe 一类标准布局的
+/// mpv 会被误判成随包实例，启动/退出 ZEX 时被 kill_all_zex_mpv 强杀（丢进度/列表）。
+/// 这里改成与 ZEX 自身目录下的随包 mpv 做**全路径**比对，只认我们自己那一个。
 fn is_zex_mpv(process: &sysinfo::Process) -> bool {
-    if !process.name().to_string_lossy().to_ascii_lowercase().eq_ignore_ascii_case("mpv.exe") {
+    if !process.name().to_string_lossy().eq_ignore_ascii_case("mpv.exe") {
         return false;
     }
     let Some(exe) = process.exe() else { return false };
-    let path = exe
-        .to_string_lossy()
-        .to_ascii_lowercase()
-        .replace('\\', "/");
-    // 去掉可能存在的 \\?\ 长路径前缀
-    path.trim_start_matches("//?/")
-        .ends_with("mpv/mpv.exe")
+    let path = norm_mpv_path(&exe.to_string_lossy());
+    match zex_mpv_path() {
+        Some(expected) => &path == expected,
+        // 极端情况下取不到 ZEX 自身路径：退回原后缀匹配，至少还能收自己的实例
+        None => path.ends_with("mpv/mpv.exe"),
+    }
 }
 
 /// 强杀所有随包 mpv 进程 —— 托盘「退出」的兜底，覆盖活跃播放会话 / 空闲预热 /
@@ -1369,8 +1423,12 @@ fn spawn_reader(
         // 永久死锁。必须先把 mode 取出来、释放锁，再去调 send_to_session
         let mode = handle.lock().as_ref().map(|s| s.mode);
         if let Some(mode) = mode {
-            let cmd = if mode == SessionMode::Video { "enable-section" } else { "disable-section" };
-            let _ = send_to_session(&handle, json!([cmd, "gamepad"]));
+            let cmd = if mode == SessionMode::Video {
+                json!(["enable-section", "gamepad", GAMEPAD_SECTION_FLAGS])
+            } else {
+                json!(["disable-section", "gamepad"])
+            };
+            let _ = send_to_session(&handle, cmd);
         }
 
         // 关键架构：observe_property 命令必须通过 reader 这条 IPC 连接发出。
@@ -1872,7 +1930,7 @@ pub fn play_episode(
         (engine, load_episode(&conn, &episode_id)?.local_path)
     };
     if engine == "external" || resolve_mpv(&app).is_none() {
-        return crate::play_video_impl(state, path);
+        return crate::settings::play_video_impl(state, path);
     }
     play_episode_mpv(app, state, episode_id)
 }
@@ -1942,7 +2000,7 @@ pub fn play_episode_mpv(
         // 全屏 + 恢复手柄控制 mpv（音乐播放时 {gamepad} 输入节被 disable）。
         // vid=auto 放到 loadlist 之后：换文件前恢复视频轨会把当前音乐封面包短暂渲染出来
         send_to_session(&state.mpv, json!(["set_property", "fullscreen", "yes"]));
-        send_to_session(&state.mpv, json!(["enable-section", "gamepad"]));
+        send_to_session(&state.mpv, json!(["enable-section", "gamepad", GAMEPAD_SECTION_FLAGS]));
         // 目标集已在本季列表里 → 直接 set playlist-pos 跳过去，无闪屏也不重建
         let in_playlist = {
             let guard = state.mpv.lock();
@@ -2063,7 +2121,7 @@ pub fn play_episode_mpv(
                 let _ = send(&mut writer, json!(["set_property", "vid", "auto"]));
                 // 激活 {gamepad} 输入节：预热实例的该节默认禁用（mpv 设计如此），
                 // 不 enable 则手柄按键事件到达但找不到绑定（No key binding found）
-                let _ = send(&mut writer, json!(["enable-section", "gamepad"]));
+                let _ = send(&mut writer, json!(["enable-section", "gamepad", GAMEPAD_SECTION_FLAGS]));
                 let _ = send(&mut writer, json!(["loadlist", m3u, "replace"]));
                 let _ = send(&mut writer, json!(["set_property", "playlist-pos", start_idx]));
                 let _ = send(&mut writer, json!(["set_property", "pause", false]));

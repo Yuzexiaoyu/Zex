@@ -1,0 +1,103 @@
+[
+  {
+    "dpr": 1,
+    "hoverStyle": {
+      "hover": true,
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1.06, 0, 0, 1.06, 0, 0)"
+    },
+    "preStyle": {
+      "card": "matrix(1, 0, 0, 1, 0, 0)",
+      "image": "matrix(1.00001, 0, 0, 1.00001, 0, 0)",
+      "timings": [
+        {
+          "type": "CSSTransition",
+          "property": "border-bottom-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-left-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-right-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "border-top-color",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "box-shadow",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 350
+        },
+        {
+          "type": "CSSTransition",
+          "property": "opacity",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "opacity",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 300
+        },
+        {
+          "type": "CSSTransition",
+          "property": "background-color",
+          "duration": 200
+        },
+        {
+          "type": "CSSTransition",
+          "property": "box-shadow",
+          "duration": 200
+        },
+        {
+          "type": "CSSTransition",
+          "property": "transform",
+          "duration": 200
+        }
+      ]
+    },
+    "finalStyle": {
+      "card": "none",
+      "image": "none"
+    },
+    "preEndVsFinal": {
+      "width": 117,
+      "height": 194,
+      "changedPixels": 7881,
+      "changedBeyondRounding": 4681,
+      "totalPixels": 22698,
+      "meanDifference": 1.674405968220401,
+      "maxDifference": 59
+    },
+    "beforeVsAfter": {
+      "width": 117,
+      "height": 194,
+      "changedPixels": 0,
+      "changedBeyondRounding": 0,
+      "totalPixels": 22698,
+      "meanDifference": 0,
+      "maxDifference": 0
+    }
+  }
+]

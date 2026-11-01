@@ -3,6 +3,7 @@ import { clsx } from 'clsx';
 import { Gamepad2, Film, Music2 } from 'lucide-react';
 import type { TopEntry } from '../types';
 import { statsCoverSrc } from '../utils/statsImages';
+import CoverImg from './CoverImg';
 import { t, useT } from '../i18n';
 
 // 三类媒体的统一配色：游戏＝主题青，影视＝紫，音乐＝绿（复用 --color-success 色值）
@@ -47,7 +48,7 @@ const FALLBACK_ICON = {
  *  宽幅缺失时回退到竖版 cover_path 裁切，都没有再回退占位。
  *  信息常驻可见（名称/副标题/时长），悬停或手柄聚焦时整行高亮。
  *  anchor 是手柄滚动定位用的 data 属性值（格式 `${media}-${index}`） */
-export const RowCard = memo(function RowCard({ entry, media, color, rank, focused, anchor, onContextMenu, coverUnavailable = false }: {
+export const RowCard = memo(function RowCard({ entry, media, color, rank, focused, anchor, onContextMenu, coverUnavailable = false, coverScale = 1 }: {
   entry: TopEntry;
   media: MediaKey;
   color: string;
@@ -56,11 +57,14 @@ export const RowCard = memo(function RowCard({ entry, media, color, rank, focuse
   anchor?: string;
   onContextMenu?: (e: React.MouseEvent, entry: TopEntry) => void;
   coverUnavailable?: boolean;
+  coverScale?: number;
 }) {
   const t = useT();
   const Icon = FALLBACK_ICON[media];
-  const imgSrc = statsCoverSrc(entry);
-  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const imgSrc = statsCoverSrc(entry, coverScale);
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  // 首屏超时只是暂时占位；晚到 load 即恢复，也适用于虚拟行卸载后的重挂载。
+  const unavailable = coverUnavailable && loadedSrc !== imgSrc;
 
   return (
     <div
@@ -73,25 +77,26 @@ export const RowCard = memo(function RowCard({ entry, media, color, rank, focuse
           无宽幅图回退竖版封面时用 2:3 竖版容器 —— 配 contain 全程不裁切、不留怪边 */}
       <div className={clsx(
         'stats-row-cover',
-        coverUnavailable && 'stats-row-cover-unavailable',
+        unavailable && 'stats-row-cover-unavailable',
         media === 'music' ? 'stats-row-cover-square'
           : entry.wide_path ? 'stats-row-cover-wide'
           : 'stats-row-cover-portrait',
       )}>
-        {imgSrc && failedSrc !== imgSrc ? (
+        {imgSrc ? (
           <>
-            <img
+            <CoverImg
               className="stats-row-img"
               data-stats-image
               src={imgSrc}
+              failureMode="placeholder"
               alt=""
               loading="lazy"
               decoding="async"
               draggable={false}
-              onError={() => setFailedSrc(imgSrc)}
-              style={coverUnavailable ? { visibility: 'hidden' } : undefined}
+              onLoad={() => setLoadedSrc(imgSrc)}
+              style={unavailable ? { visibility: 'hidden' } : undefined}
             />
-            {coverUnavailable && <div className="stats-row-img stats-row-blank absolute inset-0"><Icon size={18} /></div>}
+            <div className="stats-row-img stats-row-blank stats-row-fallback absolute inset-0"><Icon size={18} /></div>
           </>
         ) : (
           <div className="stats-row-img stats-row-blank"><Icon size={18} /></div>
@@ -129,10 +134,12 @@ export const RowCard = memo(function RowCard({ entry, media, color, rank, focuse
   && a.entry.count === b.entry.count
   && a.entry.wide_path === b.entry.wide_path
   && a.entry.cover_path === b.entry.cover_path
+  && a.entry.cover_version === b.entry.cover_version
   && a.media === b.media
   && a.color === b.color
   && a.rank === b.rank
   && a.focused === b.focused
   && a.anchor === b.anchor
   && a.coverUnavailable === b.coverUnavailable
+  && a.coverScale === b.coverScale
   && a.onContextMenu === b.onContextMenu);

@@ -32,6 +32,11 @@ export function useRightStickScroll(ref: RefObject<HTMLElement | null>) {
     if (el) pushScrollTarget(el);
     pushed.current = el;
   });
+  // 单独在卸载时移除当前目标；普通重渲染不能打乱详情/弹窗的栈顺序。
+  useEffect(() => () => {
+    if (pushed.current) popScrollTarget(pushed.current);
+    pushed.current = null;
+  }, []);
 }
 
 /** 带启用条件的变体：active 时注册 ref.current 为滚动目标，inactive 时撤销。
@@ -46,4 +51,8 @@ export function useRightStickScrollIf(ref: RefObject<HTMLElement | null>, active
     if (el) pushScrollTarget(el);
     pushed.current = el;
   });
+  useEffect(() => () => {
+    if (pushed.current) popScrollTarget(pushed.current);
+    pushed.current = null;
+  }, []);
 }

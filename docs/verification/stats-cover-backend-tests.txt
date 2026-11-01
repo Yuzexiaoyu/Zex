@@ -1,0 +1,14 @@
+
+running 9 tests
+test covers::tests::stats_cover_version_is_stable_and_tracks_submillisecond_same_size_writes ... ok
+test covers::tests::stats_thumbnail_errors_have_cors_and_invalid_sizes_do_not_create_files ... ok
+test covers::tests::stats_thumbnail_disk_cache_enforces_byte_and_entry_budgets ... ok
+test covers::tests::stats_cover_version_resolves_relocated_absolute_paths_like_protocol ... ok
+test covers::tests::stats_thumbnail_cache_reuses_bytes_and_file_without_rebuilding ... ok
+test covers::tests::stats_thumbnail_parallel_requests_share_one_cached_file ... ok
+test covers::tests::stats_thumbnail_etag_is_variant_specific_and_304_does_not_generate ... ok
+test covers::tests::stats_thumbnail_overwrite_changes_version_bytes_and_removes_old_variants ... ok
+test covers::tests::stats_thumbnails_preserve_aspect_ratio_and_never_upscale ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.23s
+

@@ -19,6 +19,7 @@ import TmdbPickerModal from '../components/TmdbPickerModal';
 import type { MediaType, SeriesCard, TmdbSearchResult } from '../types';
 import { coverSrc, yearOf } from '../utils/media';
 import { prepareImages } from '../utils/preloadImages';
+import { firstSeriesPosterCount, selectDefaultSeriesHero } from '../utils/seriesImages';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useFocusStore, useGamepadGroup, useGamepadFocus, useFocusIndex } from '../gamepad';
 import { useT } from '../i18n';
@@ -66,6 +67,7 @@ export default function SeriesView() {
   // 逐字段订阅：整墙海报不该跟着音乐进度等无关字段每秒重画
   const series = useAppStore((s) => s.series);
   const loadSeries = useAppStore((s) => s.loadSeries);
+  const ensureSeriesLoaded = useAppStore((s) => s.ensureSeriesLoaded);
   const reorderSeries = useAppStore((s) => s.reorderSeries);
 
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -110,7 +112,9 @@ export default function SeriesView() {
   useEscIntercept(!!menu || !!libMenu);
   useEscIntercept(!!drag);
 
-  useEffect(() => { void loadSeries(); }, [loadSeries]);
+  useEffect(() => {
+    void ensureSeriesLoaded().catch(() => {});
+  }, [ensureSeriesLoaded]);
 
   useEffect(() => {
     if (!menu && !libMenu) return;
@@ -176,16 +180,7 @@ export default function SeriesView() {
 
   // ─── Hero ──────────────────────────────────
   // 默认展示：继续观看的最近一部，没有则挑最近添加的
-  const defaultHero = useMemo(() => {
-    if (series.length === 0) return null;
-    const watching = series
-      .filter((s) => s.last_watched_at && s.next_episode)
-      .sort((a, b) => (b.last_watched_at || '').localeCompare(a.last_watched_at || ''));
-    if (watching.length > 0) return watching[0];
-    const withArt = series.filter((s) => s.bg_path || s.poster_path);
-    const pool = withArt.length > 0 ? withArt : series;
-    return [...pool].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))[0] ?? null;
-  }, [series]);
+  const defaultHero = useMemo(() => selectDefaultSeriesHero(series), [series]);
 
   // 悬停哪张海报，上方就切成哪部剧；移开后回到默认。
   // 拖拽期间锁定为被拖动的那张（拖拽会关掉卡片的指针事件，否则信息会掉回默认剧）
@@ -197,7 +192,7 @@ export default function SeriesView() {
 
   // 鼠标悬停/手柄聚焦时预解码目标详情的两张首屏图，短暂掠过不触发读盘。
   useEffect(() => {
-    if (!hero) return;
+    if (!hero || !focusId) return;
     const timer = window.setTimeout(() => {
       void prepareImages([
         coverSrc(hero.poster_path, hero.updated_at),
@@ -205,7 +200,7 @@ export default function SeriesView() {
       ]);
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [hero?.id, hero?.poster_path, hero?.bg_path, hero?.updated_at]);
+  }, [focusId, hero?.id, hero?.poster_path, hero?.bg_path, hero?.updated_at]);
 
   // 悬停即切换；移开不回落，信息停在最后看过的那部，直到悬停另一张海报
   const previewSeries = (id: string) => setHoverId(id);
@@ -214,6 +209,10 @@ export default function SeriesView() {
   // 仅自定义排序且未筛选时可拖（其它排序下位置由规则决定，拖动没有意义）
   const dragEnabled = sort === 'custom' && !query.trim() && filter === 'all';
   const displayList = liveItems ?? visible;
+  const eagerPosters = firstSeriesPosterCount(
+    scrollRef.current?.clientWidth || window.innerWidth,
+    scrollRef.current?.clientHeight || window.innerHeight,
+  );
   const dragging = drag !== null;
 
   // ─── 手柄焦点导航 ──────────────────────────
@@ -522,6 +521,8 @@ export default function SeriesView() {
                   key={`bg-${hero.id}`}
                   className={clsx('hero-bg', !hero.bg_path && 'hero-bg-poster')}
                   src={coverSrc(hero.bg_path || hero.poster_path, hero.updated_at)}
+                  fetchPriority="high"
+                  decoding="async"
                   alt=""
                 />
               )}
@@ -649,7 +650,9 @@ export default function SeriesView() {
                     >
                       <div className="poster-frame">
                         {s.poster_path ? (
-                          <img src={coverSrc(s.poster_path, s.updated_at)} alt={s.title} loading="lazy" className="poster-img" draggable={false} />
+                          <img src={coverSrc(s.poster_path, s.updated_at)} alt={s.title}
+                            loading={idx < eagerPosters ? 'eager' : 'lazy'} fetchPriority={idx < eagerPosters ? 'high' : 'low'}
+                            decoding="async" className="poster-img" draggable={false} />
                         ) : (
                           <div className="poster-img flex items-center justify-center bg-gradient-to-br from-[#2a1a4e] to-[#0d0d2b]">
                             <Film size={38} className="text-text-tertiary" />

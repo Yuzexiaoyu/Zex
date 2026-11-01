@@ -12,7 +12,7 @@ import StatsAdjustModal from '../components/StatsAdjustModal';
 import CoverPickerModal from '../components/CoverPickerModal';
 import { useT } from '../i18n';
 import { preloadStatsImages } from '../utils/statsPreload';
-import { statsCoverSrc } from '../utils/statsImages';
+import { statsCoverSrc, useStatsCoverScale } from '../utils/statsImages';
 
 // label/unit/countLabel 存 i18n key，渲染时 t() 取词
 const SECTIONS = [
@@ -52,13 +52,14 @@ const NO_UNAVAILABLE_COVERS: ReadonlySet<string> = new Set();
 
 /** 单列：类别标题 + 总时长 + 封面网格。
  *  每个类别一个手柄焦点组（'stats:col:xxx'）——左右键跨列、上下键在列内移动 */
-function ColSection({ stats, section, colOrder, onOpenMenu, ready, unavailableCovers }: {
+function ColSection({ stats, section, colOrder, onOpenMenu, ready, unavailableCovers, coverScale }: {
   stats: Stats;
   section: (typeof SECTIONS)[number];
   colOrder: SectionKey[];  // 可见列顺序（隐藏的库不在内），手柄左右跨列按它跳转
   onOpenMenu: (e: React.MouseEvent, entry: TopEntry) => void; // 行右键（仅游戏列绑定）
   ready: boolean;
   unavailableCovers: ReadonlySet<string>;
+  coverScale: number;
 }) {
   const t = useT();
   const d = stats[section.key];
@@ -135,12 +136,13 @@ function ColSection({ stats, section, colOrder, onOpenMenu, ready, unavailableCo
           rank={i + 1}
           focused={focusedIndex === i}
           anchor={`${section.key}-${i}`}
-          coverUnavailable={unavailableCovers.has(statsCoverSrc(e))}
+          coverUnavailable={unavailableCovers.has(statsCoverSrc(e, coverScale))}
+          coverScale={coverScale}
           onContextMenu={section.key === 'game' ? onOpenMenu : undefined}
         />
       </div>
     );
-  }), [virtualRows, top, section, focusedIndex, onOpenMenu, unavailableCovers]);
+  }), [virtualRows, top, section, focusedIndex, onOpenMenu, unavailableCovers, coverScale]);
 
   // 每次切入只编排当前可视的行；滚动/刷新后新挂载的行直接显示，不重复入场。
   // 先批量读取几何信息，再写入标记，避免逐行读写引起反复布局。
@@ -221,6 +223,7 @@ function StatsPlaceholder({ sections }: { sections: readonly (typeof SECTIONS)[n
 
 export default function StatsView({ active }: { active: boolean }) {
   const t = useT();
+  const coverScale = useStatsCoverScale();
   const stats = useAppStore((s) => s.stats);
   const loadStats = useAppStore((s) => s.loadStats);
   const preparePresentation = useAppStore((s) => s.prepareStatsPresentation);
@@ -300,6 +303,8 @@ export default function StatsView({ active }: { active: boolean }) {
     let firstFrame = 0;
     let secondFrame = 0;
     const dispose = preloadStatsImages(pageRef.current, ({ unavailableSources }) => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
       firstFrame = requestAnimationFrame(() => {
         secondFrame = requestAnimationFrame(() => preparePresentation(stats, hiddenLibraries, unavailableSources));
       });
@@ -309,7 +314,7 @@ export default function StatsView({ active }: { active: boolean }) {
       cancelAnimationFrame(firstFrame);
       cancelAnimationFrame(secondFrame);
     };
-  }, [stats, hasData, hiddenLibraries, error, preparePresentation]);
+  }, [stats, hasData, hiddenLibraries, error, preparePresentation, coverScale]);
 
   if (error && !stats) {
     return (
@@ -357,7 +362,7 @@ export default function StatsView({ active }: { active: boolean }) {
           onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
         >
           {visibleSections.map((s) => (
-            <ColSection key={s.key} stats={stats} section={s} colOrder={visibleOrder} onOpenMenu={openRowMenu} ready={active} unavailableCovers={unavailableCovers} />
+            <ColSection key={s.key} stats={stats} section={s} colOrder={visibleOrder} onOpenMenu={openRowMenu} ready={active} unavailableCovers={unavailableCovers} coverScale={coverScale} />
           ))}
         </div>
       </div>

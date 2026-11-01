@@ -17,8 +17,9 @@ import SortMenu, { type SortOption, type SortMenuHandle } from '../components/So
 import type { Track } from '../types';
 import { coverSrc } from '../utils/media';
 import CoverImg from '../components/CoverImg';
+import { prepareVisibleImages } from '../utils/gridImages';
 import { useEscIntercept } from '../utils/escIntercept';
-import { useGamepadGroup, useFocusIndex, useRightStickScroll } from '../gamepad';
+import { useGamepadGroup, useFocusIndex, useRightStickScrollIf } from '../gamepad';
 import { useT } from '../i18n';
 
 type SortKey = 'recent' | 'title' | 'artist' | 'album' | 'custom';
@@ -70,13 +71,24 @@ function fmtTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export default function MusicView() {
+export default function MusicView({ active: suppliedActive }: { active?: boolean } = {}) {
+  const active = suppliedActive ?? true;
+  const requested = useAppStore((s) => s.activeView);
+  const musicRequested = suppliedActive === undefined || requested === 'music';
+  const interactive = active && musicRequested;
   const t = useT();
   // 逐字段订阅：曲目列表最长，不能跟着 nowPlaying.positionMs 每秒重画整表
   const tracks = useAppStore((s) => s.tracks);
   const playlists = useAppStore((s) => s.playlists);
   const loadTracks = useAppStore((s) => s.loadTracks);
   const loadPlaylists = useAppStore((s) => s.loadPlaylists);
+  const tracksStatus = useAppStore((s) => s.tracksStatus);
+  const tracksError = useAppStore((s) => s.tracksError);
+  const playlistsStatus = useAppStore((s) => s.playlistsStatus);
+  const preparePresentation = useAppStore((s) => s.prepareMusicPresentation);
+  const invalidatePresentation = useAppStore((s) => s.invalidateMusicPresentation);
+  const dataSettled = (tracksStatus === 'ready' || tracksStatus === 'error')
+    && (playlistsStatus === 'ready' || playlistsStatus === 'error');
   const deleteTrack = useAppStore((s) => s.deleteTrack);
   const toggleTrackFavorite = useAppStore((s) => s.toggleTrackFavorite);
   const playTrack = useAppStore((s) => s.playTrack);
@@ -132,14 +144,18 @@ export default function MusicView() {
     return () => ro.disconnect();
   }, [multi]);
 
-  useEscIntercept(!!menu || !!bulkMenu || !!playlistMenu);
+  useEscIntercept(interactive && (!!menu || !!bulkMenu || !!playlistMenu));
 
-  useEffect(() => { void loadTracks(); }, [loadTracks]);
-  useEffect(() => { void loadPlaylists(); }, [loadPlaylists]);
+  useEffect(() => {
+    if (useAppStore.getState().tracksStatus === 'idle') void loadTracks().catch(() => {});
+  }, [loadTracks]);
+  useEffect(() => {
+    if (useAppStore.getState().playlistsStatus === 'idle') void loadPlaylists().catch(() => {});
+  }, [loadPlaylists]);
 
   // 右键菜单 / 多选批量菜单 / 歌单右键菜单：点击别处 / Esc 关闭
   useEffect(() => {
-    if (!menu && !bulkMenu && !playlistMenu) return;
+    if (!interactive || (!menu && !bulkMenu && !playlistMenu)) return;
     const close = () => { setMenu(null); setBulkMenu(null); setPlaylistMenu(null); };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     window.addEventListener('click', close);
@@ -154,7 +170,7 @@ export default function MusicView() {
       window.removeEventListener('resize', close);
       window.removeEventListener('keydown', onKey);
     };
-  }, [menu, bulkMenu, playlistMenu]);
+  }, [interactive, menu, bulkMenu, playlistMenu]);
 
   // ─── 列表：搜索 + 收藏/歌单筛选 + 排序（前端本地，曲目量级无需后端） ───
   // 当前筛选的歌单（filter = "playlist:<id>"）；track_ids 集合供本地过滤
@@ -197,7 +213,7 @@ export default function MusicView() {
   // 工作副本的 ref 和 state 必须成对更新：ref 给几何计算读（同步、不等渲染），
   // state 给克隆渲染读。手写两行曾漏掉其中一半 → 小范围拖拽时那一项直接消失
   const setLiveBoth = (arr: Track[] | null) => { liveRef.current = arr; setLiveTracks(arr); };
-  const dragEnabled = sort === 'custom' && !query.trim() && filter === 'all' && !multiSelect;
+  const dragEnabled = interactive && sort === 'custom' && !query.trim() && filter === 'all' && !multiSelect;
   // 只有真正激活拖拽（移动超 4px）才屏蔽指针事件 —— pointerdown 未激活时若加
   // music-dragging，.music-dragging .music-row 的 pointer-events:none 会吞掉 click，
   // 点击行就无法播放/多选了
@@ -207,38 +223,60 @@ export default function MusicView() {
   // ─── 入场动画 ─────────────────────────────
   // 入场动画只属于「视图刚出现的首屏那批行」，不属于某一行。虚拟滚动下行会反复挂载，
   // 所以有两条硬约束：
-  //   1) 延迟必须按绝对行号算。用「本批虚拟行里的序号」算的话，批次窗口一滑动，
+  //   1) 延迟按本次入场起点固定。用「本批虚拟行里的序号」算的话，批次窗口一滑动，
   //      已挂载行的 animation-delay 就被改写 —— 浏览器会重算动画本地时间、把运行中
   //      的动画拽回起始相位，整行连封面一起重闪一遍
   //   2) 只有首屏那批行能拿动画。music-row-reveal 是 both 填充，延迟期内 opacity:0；
   //      滚动挂载进来的行若也加动画，行号一大就是几百 ms 的透明期 —— 那正是
   //      「入场没播完往下滚一片空白」
   const [introCells, setIntroCells] = useState(0);
+  const [introStart, setIntroStart] = useState(0);
   const [introDone, setIntroDone] = useState(false);
+  const hasRows = displayList.length > 0;
+  const preparation = useMemo(() => ({ tracks, playlists, musicLayout, displayList, cols, introCells }),
+    [tracks, playlists, musicLayout, displayList, cols, introCells]);
+  const [prepared, setPrepared] = useState<typeof preparation | null>(null);
+  const introImagesReady = prepared === preparation;
+  const entryShown = useRef(false);
+  useLayoutEffect(() => {
+    if (!active) entryShown.current = false;
+    else if (introImagesReady || introDone || everDragged) entryShown.current = true;
+  }, [active, introImagesReady, introDone, everDragged]);
+  // 预热与入场分离。隐藏页没有动画，切回时只编排当前视口，保留筛选和滚动位置。
+  useLayoutEffect(() => {
+    setIntroDone(false);
+    setEverDragged(false);
+    if (active) setIntroStart(Math.floor((listRef.current?.scrollTop ?? 0) / rowH) * cols);
+  }, [active]);
   // 首屏能放几行。用 layout effect 而非 effect：它在首帧绘制前跑，setState 触发的
   // 重渲染也在绘制前完成。首帧 listRef 还是 null、虚拟化器量不到高度 → 一行都不渲染，
   // 所以不存在「先画了没动画的行、再补上动画」的闪
   useLayoutEffect(() => {
     const el = listRef.current;
-    if (el) setIntroCells(Math.ceil(el.clientHeight / rowH) * cols);
-  }, [rowH, cols]);
+    if (!el || !hasRows) return;
+    const measure = () => setIntroCells(Math.ceil((el.clientHeight + el.scrollTop % rowH) / rowH) * cols);
+    measure();
+    const resize = new ResizeObserver(measure);
+    resize.observe(el);
+    return () => resize.disconnect();
+  }, [rowH, cols, hasRows, active]);
   // 每列速度不同，按实际首屏成员的最晚结束时间收尾，避免截断慢列。
   // 起算点是「行真正出现」而不是挂载，异步载入曲目也能完整播放入场。
-  const hasRows = displayList.length > 0;
   const introEnd = useMemo(() => {
     let end = 0;
-    const count = Math.min(introCells, displayList.length);
+    const count = Math.min(introCells, Math.max(0, displayList.length - introStart));
     for (let i = 0; i < count; i++) {
       const timing = musicIntro(Math.floor(i / cols), i % cols, multi);
       end = Math.max(end, timing.delay + timing.duration);
     }
     return end + 48;
-  }, [introCells, displayList.length, cols, multi]);
+  }, [introCells, introStart, displayList.length, cols, multi]);
   useEffect(() => {
-    if (!introCells || !hasRows) return;
+    if (!active || !introCells || !hasRows || !introImagesReady || introDone) return;
     const id = setTimeout(() => setIntroDone(true), introEnd);
     return () => clearTimeout(id);
-  }, [introCells, hasRows, introEnd]);
+  }, [active, introCells, hasRows, introEnd, introImagesReady, introDone]);
+  const preparingCovers = hasRows && !introImagesReady && !introDone && !everDragged && !entryShown.current;
 
   // ─── 指针高亮 ─────────────────────────────
   // 不走 CSS :hover —— Chromium 滚动时不刷新 hover 命中测试，滚轮滚动会把高亮
@@ -298,14 +336,17 @@ export default function MusicView() {
     scrollingRef.current = false;
     paintHl();
   };
+  const latestEndScrolling = useRef(endScrolling);
+  useLayoutEffect(() => { latestEndScrolling.current = endScrolling; });
   const onListScroll = () => {
+    if (!interactive) return;
     // 首次滚动即结束入场：首屏行往回滚会重挂载，窗口还没过期的话会再播一次动画
     // （= 又一次空白）。已在动画中的行随类名撤销直接落到终态，不闪
     if (!introDone) setIntroDone(true);
     scrollingRef.current = true;
     hideHl(); // 同步熄灭，不等 rAF
     if (scrollIdleRef.current) window.clearTimeout(scrollIdleRef.current);
-    scrollIdleRef.current = window.setTimeout(endScrolling, 90); // scrollend 的兜底
+    scrollIdleRef.current = window.setTimeout(() => latestEndScrolling.current(), 90); // scrollend 的兜底
   };
   const onListPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
@@ -328,11 +369,13 @@ export default function MusicView() {
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    el.addEventListener('scrollend', endScrolling);
+    const onScrollEnd = () => latestEndScrolling.current();
+    el.addEventListener('scrollend', onScrollEnd);
     return () => {
-      el.removeEventListener('scrollend', endScrolling);
+      el.removeEventListener('scrollend', onScrollEnd);
       if (hlRafRef.current) cancelAnimationFrame(hlRafRef.current);
       if (scrollIdleRef.current) window.clearTimeout(scrollIdleRef.current);
+      hlRafRef.current = 0; scrollIdleRef.current = 0;
     };
   }, []);
 
@@ -344,11 +387,43 @@ export default function MusicView() {
     estimateSize: () => rowH,
     // 滚轮快滑时原生滚动跑在 React 重渲染前面，窗口外无行可显 → 一片纯白（连文字都
     // 没有），停下才补齐。治它就是把 overscan 缓冲放大：每行的重活（封面 fetch / 解码）
-    // 都在 useEffect 里、发生在「绘制之后」，渲染阶段本身很轻，所以多备几行几乎不花钱、
-    // 是划算的。单列一行一曲，缓冲给到 24 最划算；多列一行 cols 曲、同样行数 DOM 翻几倍，
-    // 收敛到 16。封面请求再多也由 CoverImg 的并发闸兜住，不会因此拥塞
+    // 走 CoverImg 队列，不阻塞渲染。单列缓冲 24 行，多列缓冲 16 行；
+    // 下方按实际视口给封面请求分优先级，缓冲区不再抢占首屏队列。
     overscan: multi ? 16 : 24,
   });
+
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const viewportTop = rowVirtualizer.scrollOffset ?? 0;
+  const viewportHeight = rowVirtualizer.scrollRect?.height ?? 0;
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || !dataSettled) return;
+    if (active && prepared === preparation) return;
+    if (hasRows && (!introCells || !virtualRows.length)) return;
+    invalidatePresentation();
+    setPrepared(null);
+    let disposed = false;
+    let firstFrame = 0;
+    let secondFrame = 0;
+    const finish = () => {
+      if (disposed) return;
+      setPrepared(preparation);
+      // 先解除行的准备隐藏，给透明常驻层两帧绘制，再宣告可切入。
+      firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(() => {
+          if (!disposed) preparePresentation(tracks, playlists, musicLayout);
+        });
+      });
+    };
+    const dispose = hasRows ? prepareVisibleImages(list, '.music-row', finish) : (() => { finish(); return () => {}; })();
+    return () => {
+      disposed = true;
+      dispose();
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [active, preparation, dataSettled, hasRows, virtualRows.length, preparePresentation, invalidatePresentation]);
+  useEffect(() => () => invalidatePresentation(), [invalidatePresentation]);
 
   // 行高/列数变了：virtualizer 不会自己重跑 estimateSize，必须显式 measure，
   // 否则总高度和每行 start 还是旧行高算出来的（行会重叠或留大片空白）。
@@ -481,7 +556,7 @@ export default function MusicView() {
   // 旧写法在 pointerdown 里 add、重渲染后的 cleanupDrag 来 remove —— 引用不同，
   // 监听永久残留：每次拖拽泄漏 4 个 + 拖拽结束后幽灵滚动（鼠标在列表边缘时列表自己滚）
   useEffect(() => {
-    if (!drag) return;
+    if (!interactive || !drag) return;
     // window 级监听：拖拽行重挂载会丢 setPointerCapture，不能用
     window.addEventListener('pointermove', onDragPointerMove);
     window.addEventListener('pointerup', onDragPointerUp);
@@ -493,22 +568,34 @@ export default function MusicView() {
       window.removeEventListener('keydown', onDragKeyDown);
       window.removeEventListener('blur', onDragCancel);
     };
-  }, [!!drag]);
+  }, [interactive, !!drag]);
+
+  useLayoutEffect(() => {
+    if (interactive) return;
+    setMenu(null); setBulkMenu(null); setPlaylistMenu(null);
+    setShowAddModal(false); setShowCreatePlaylist(null);
+    dragRef.current = null; setDrag(null); setLiveBoth(null);
+    ptrInListRef.current = false; scrollingRef.current = false;
+    hideHl();
+    if (hlRafRef.current) cancelAnimationFrame(hlRafRef.current);
+    if (scrollIdleRef.current) window.clearTimeout(scrollIdleRef.current);
+    hlRafRef.current = 0; scrollIdleRef.current = 0;
+  }, [interactive]);
 
   // 手柄焦点：列表组（上下选，A 播放）
   // 手柄焦点：列表组（上下选，A 播放）。无 leave —— 十字键在列表顶部/底部停在边界，
   // 移不到顶部导航行（游戏库/影视库/音乐库 tab 那行）；切库走肩键
   useGamepadGroup('music-list', {
-    count: displayList.length,
+    count: interactive ? displayList.length : 0,
     cols,
-    activate: (i) => { const t = displayList[i]; if (t) handlePlay(t); },
+    activate: (i) => { if (!interactive) return; const t = displayList[i]; if (t) handlePlay(t); },
     // 虚拟滚动下屏外行不在 DOM 里，必须走 virtualizer 定位；多列时序号要先折成行号
     // （旧写法 listRef.children[i] 取到的是包裹层而非行，一直没生效过）
-    scrollIntoView: (i) => rowVirtualizer.scrollToIndex(Math.floor(i / cols), { align: 'auto' }),
-  });
+    scrollIntoView: (i) => { if (interactive) rowVirtualizer.scrollToIndex(Math.floor(i / cols), { align: 'auto' }); },
+  }, interactive);
   const listFocused = useFocusIndex('music-list');
   // 右摇杆滚动目标：音乐库列表容器
-  useRightStickScroll(listRef);
+  useRightStickScrollIf(listRef, interactive);
 
   // 播放：以当前排序/筛选列表为队列，从这首开始（mpv video=no，ZEX 留在前台）
   // 参数名用 track：组件里已有翻译函数 t，避免遮蔽
@@ -660,6 +747,7 @@ export default function MusicView() {
             </button>
             <SortMenu
               ref={sortRef}
+              enabled={interactive}
               value={sort}
               options={SORTS}
               onChange={(k) => setSort(k as SortKey)}
@@ -675,6 +763,9 @@ export default function MusicView() {
       <div className="relative flex-1 min-h-0 overflow-hidden">
       <div ref={hlRef} className="music-hl" aria-hidden />
       <div ref={listRef}
+        data-music-list
+        data-music-preparing={preparingCovers ? '' : undefined}
+        aria-busy={preparingCovers}
         onScroll={onListScroll}
         onPointerMove={onListPointerMove}
         onPointerEnter={() => { ptrInListRef.current = true; }}
@@ -684,12 +775,15 @@ export default function MusicView() {
           <div className="h-full flex flex-col items-center justify-center gap-6">
             <div className="empty-orb"><Music size={38} /></div>
             <div className="text-center">
-              <p className="text-xl font-bold mb-2">{t('music.emptyTitle')}</p>
-              <p className="text-sm text-text-tertiary">{t('music.emptyDesc')}</p>
+              <p className="text-xl font-bold mb-2">{t(tracksError ? 'common.error' : 'music.emptyTitle')}</p>
+              <p className="text-sm text-text-tertiary">{tracksError || t('music.emptyDesc')}</p>
             </div>
-            <button className="btn btn-accent gap-2 px-6 py-3 text-sm" onClick={() => setShowAddModal(true)}>
+            <button className="btn btn-accent gap-2 px-6 py-3 text-sm" onClick={() => {
+              if (tracksError) void loadTracks().catch(() => {});
+              else setShowAddModal(true);
+            }}>
               <Plus size={16} />
-              {t('music.addMusic')}
+              {t(tracksError ? 'common.retry' : 'music.addMusic')}
             </button>
           </div>
         ) : displayList.length === 0 ? (
@@ -699,10 +793,11 @@ export default function MusicView() {
           </div>
         ) : (
           <div className="relative w-full" style={{ height: rowVirtualizer.getTotalSize() }}>
-            {rowVirtualizer.getVirtualItems().map((vRow) => {
+            {virtualRows.map((vRow) => {
               // 单列一行一曲；多列一行 cols 曲（末行可能不满）
               const rowStart = vRow.index * cols;
               const rowTracks = displayList.slice(rowStart, rowStart + cols);
+              const visible = vRow.end > viewportTop && vRow.start < viewportTop + viewportHeight;
               if (rowTracks.length === 0) return null;
               return (
               // 外层只管虚拟定位与分列：入场动画会动 transform，
@@ -720,8 +815,8 @@ export default function MusicView() {
                 {rowTracks.map((trk, colIdx) => {
                   const idx = rowStart + colIdx;
                   // 以绝对行列取节奏，虚拟窗口移动时不会改写同一首曲目的延迟。
-                  const introCell = !everDragged && !introDone && idx < introCells;
-                  const intro = musicIntro(vRow.index, colIdx, multi);
+                  const introCell = active && !everDragged && !introDone && idx >= introStart && idx < introStart + introCells;
+                  const intro = musicIntro(vRow.index - Math.floor(introStart / cols), colIdx, multi);
                   return (
                   <div
                     key={trk.id}
@@ -770,10 +865,14 @@ export default function MusicView() {
                       multi ? 'w-10 h-10' : 'w-11 h-11',
                     )}>
                       {trk.cover_path ? (
-                        // 行挂载时就在视口内（虚拟滚动 overscan 保证），lazy 只延迟解码调度
-                        // —— 快速滚动停下时全视口同时补解码。eager 挂载即解码；CoverImg
-                        // 提供内存缓存层（滚动回来零协议往返出图）
-                        <CoverImg src={coverSrc(trk.cover_path, trk.updated_at)} alt="" loading="eager" decoding="async" className="w-full h-full object-cover" draggable={false} />
+                        // eager 让已取回的图片及时解码；可视行的请求优先于 overscan，
+                        // CoverImg 复用跨挂载缓存。首次显示由首屏准备器统一交接。
+                        <>
+                          <CoverImg src={coverSrc(trk.cover_path, trk.updated_at)} alt="" loading="eager" decoding="async"
+                            fetchPriority={visible ? (musicRequested ? 'high' : 'auto') : 'low'} failureMode="placeholder"
+                            className="music-cover-image w-full h-full object-cover" draggable={false} />
+                          <Music2 size={multi ? 18 : 20} className="music-cover-fallback absolute text-text-tertiary" />
+                        </>
                       ) : (
                         <Music2 size={multi ? 18 : 20} className="text-text-tertiary" />
                       )}
@@ -844,7 +943,7 @@ export default function MusicView() {
       </div>
 
       {/* 拖拽克隆：跟随指针（只保留封面/歌名/歌手，精简渲染） */}
-      {drag?.active && liveTracks && createPortal(
+      {interactive && drag?.active && liveTracks && createPortal(
         <div
           className="drag-clone"
           style={{
@@ -881,11 +980,11 @@ export default function MusicView() {
       )}
 
       {/* 弹窗与菜单 */}
-      {showAddModal && (
+      {interactive && showAddModal && (
         <AddMusicModal onClose={() => setShowAddModal(false)} onSuccess={() => { void loadTracks(); }} />
       )}
 
-      {menu && (
+      {interactive && menu && (
         <MusicContextMenu
           track={menu.t}
           x={menu.x}
@@ -899,7 +998,7 @@ export default function MusicView() {
       )}
 
       {/* 多选模式的右键菜单：新建歌单 / 添加到歌单 / 批量删除 */}
-      {bulkMenu && createPortal(
+      {interactive && bulkMenu && createPortal(
         <div
           className="fixed z-[100]"
           style={{
@@ -928,7 +1027,7 @@ export default function MusicView() {
       )}
 
       {/* 新建歌单弹窗：创建后自动筛选到新歌单 */}
-      {showCreatePlaylist !== null && (
+      {interactive && showCreatePlaylist !== null && (
         <CreatePlaylistModal
           initialTrackIds={showCreatePlaylist}
           onClose={() => setShowCreatePlaylist(null)}
@@ -937,7 +1036,7 @@ export default function MusicView() {
       )}
 
       {/* 歌单 chip 右键菜单：删除歌单 */}
-      {playlistMenu && createPortal(
+      {interactive && playlistMenu && createPortal(
         <div
           className="fixed z-[100]"
           style={{

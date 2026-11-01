@@ -18,6 +18,7 @@ mod gamepad;
 mod rtss;
 mod sync;
 mod stats;
+mod covers;
 mod lyrics;
 mod games;
 mod folders;
@@ -1042,6 +1043,9 @@ pub struct TopEntry {
     pub cover_path: String,
     /// 宽幅封面：游戏取 banner_path，剧集取 bg_path，音乐留空（用方形 cover_path）
     pub wide_path: String,
+    /// Selected stats cover identity (mtime nanoseconds + size), populated after source selection.
+    #[serde(default)]
+    pub cover_version: String,
     pub seconds: i64,
     /// 播放次数。只统计音乐（tracks.play_count），游戏/影视恒为 0
     pub count: i64,
@@ -1457,7 +1461,7 @@ pub fn run() {
         sync_pending: Arc::new(AtomicBool::new(false)),
     };
 
-    let covers_dir = data_dir.join("covers");
+    let cover_service = Arc::new(covers::CoverService::new(data_dir.join("covers")));
 
     tauri::Builder::default()
         // 单实例保护必须第一个注册（插件生效要求）：开机自启后用户再双击 exe 时，
@@ -1477,8 +1481,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_os::init())
         // 本地图片协议：http://covers.localhost/<编码后的绝对路径>
-        .register_uri_scheme_protocol("covers", move |_ctx, request| {
-            music::serve_covers_file(&covers_dir, &request)
+        .register_asynchronous_uri_scheme_protocol("covers", move |_ctx, request, responder| {
+            cover_service.dispatch(request, responder);
         })
         .manage(app_state)
         // 点右上角的叉（以及 Alt+F4）不退出，只隐藏到托盘：游戏时长由后端线程继续累计

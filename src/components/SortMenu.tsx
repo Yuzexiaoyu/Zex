@@ -20,6 +20,8 @@ interface Props {
   onChange: (key: string) => void;
   /** 手柄焦点是否停在排序按钮上（加高亮） */
   focused?: boolean;
+  /** 后台预渲染保留按钮布局，但不注册手柄组或打开浮层。 */
+  enabled?: boolean;
 }
 
 export interface SortMenuHandle {
@@ -30,39 +32,41 @@ const MENU_WIDTH = 232;
 
 // 排序下拉：原生 select 的弹层由系统绘制、与玻璃主题格格不入，这里换成自绘菜单。
 // 菜单用 portal 挂到 body —— 工具栏是 sticky + backdrop-filter，容器内的绝对定位会被裁切
-const SortMenu = forwardRef<SortMenuHandle, Props>(function SortMenu({ value, options, onChange, focused }, ref) {
+const SortMenu = forwardRef<SortMenuHandle, Props>(function SortMenu({ value, options, onChange, focused, enabled = true }, ref) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const current = options.find((o) => o.key === value) ?? options[0];
+  const menuOpen = enabled && open;
 
   // 手柄：暴露 toggle 给父组件（工具栏 A 激活排序时开/关菜单）
-  useImperativeHandle(ref, () => ({ toggle: () => setOpen((v) => !v) }));
+  useImperativeHandle(ref, () => ({ toggle: () => { if (enabled) setOpen((v) => !v); } }));
 
   // 菜单打开时压栈聚焦：上下选、A 确定、B 关闭
   useGamepadGroup('sort-menu', {
-    count: open ? options.length : 0,
+    count: options.length,
     cols: 1,
-    activate: (i) => { onChange(options[i].key); setOpen(false); },
+    activate: (i) => { if (menuOpen && options[i]) { onChange(options[i].key); setOpen(false); } },
     exit: () => setOpen(false),
-  });
+  }, menuOpen);
   useEffect(() => {
-    if (!open) return;
+    if (!menuOpen) return;
     useFocusStore.getState().push('sort-menu');
     return () => {
       const s = useFocusStore.getState();
       const top = s.stack.length ? s.stack[s.stack.length - 1] : undefined;
       if (top?.group === 'sort-menu') s.back();
     };
-  }, [open]);
+  }, [menuOpen]);
   const menuFocused = useFocusIndex('sort-menu');
 
   // 下拉开着时由它消费 Esc，App 的全局「Esc=收托盘」让位
-  useEscIntercept(open);
+  useEscIntercept(menuOpen);
 
   useLayoutEffect(() => {
-    if (!open) {
+    if (!menuOpen) {
+      if (!enabled) setOpen(false);
       setPos(null);
       return;
     }
@@ -72,10 +76,10 @@ const SortMenu = forwardRef<SortMenuHandle, Props>(function SortMenu({ value, op
       left: Math.max(8, Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8)),
       top: Math.min(rect.bottom + 8, window.innerHeight - 16),
     });
-  }, [open]);
+  }, [menuOpen, enabled]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!menuOpen) return;
     const close = () => setOpen(false);
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     window.addEventListener('click', close);
@@ -90,23 +94,24 @@ const SortMenu = forwardRef<SortMenuHandle, Props>(function SortMenu({ value, op
       window.removeEventListener('scroll', close, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [menuOpen]);
 
   return (
     <>
       <button
         ref={btnRef}
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className={clsx('sort-trigger', open && 'active', focused && 'gamepad-focus')}
+        disabled={!enabled}
+        onClick={(e) => { e.stopPropagation(); if (enabled) setOpen((v) => !v); }}
+        className={clsx('sort-trigger', menuOpen && 'active', enabled && focused && 'gamepad-focus')}
         title={t('common.selectSort')}
       >
         <ArrowUpDown size={14} />
         <span className="text-text-tertiary">{t('common.sort')}</span>
         <span className="font-medium text-text-primary">{current ? t(current.label) : ''}</span>
-        <ChevronDown size={13} className={clsx('transition-transform duration-200', open && 'rotate-180')} />
+        <ChevronDown size={13} className={clsx('transition-transform duration-200', menuOpen && 'rotate-180')} />
       </button>
 
-      {open && pos && createPortal(
+      {menuOpen && pos && createPortal(
         <div
           className="fixed z-[150]"
           style={{ left: pos.left, top: pos.top }}

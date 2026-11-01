@@ -98,11 +98,11 @@ try {
       await page.evaluate(() => document.getElementById('nav-stats').click());
       await page.waitForFunction(() => window.store.getState().activeView === 'stats');
       assert.equal(await page.locator('[data-presented-view]').getAttribute('data-presented-view'), 'games');
-      await page.evaluate(() => document.getElementById('nav-music').click());
-      await page.waitForSelector('[data-presented-view="music"]');
+      await page.evaluate(() => document.getElementById('nav-settings').click());
+      await page.waitForSelector('[data-presented-view="settings"]');
       await page.evaluate(() => window.releaseStats());
       await page.waitForFunction(() => { const s=window.store.getState(); return s.statsPresentation?.stats === s.stats && s.statsPresentation?.libraries === s.hiddenLibraries; });
-      assert.equal(await page.locator('[data-presented-view]').getAttribute('data-presented-view'), 'music', 'late preparation cannot reopen a cancelled destination');
+      assert.equal(await page.locator('[data-presented-view]').getAttribute('data-presented-view'), 'settings', 'late preparation cannot reopen a cancelled destination');
       assert.equal(await page.evaluate(() => window.starts), 0, 'cancelled navigation cannot consume the entrance animation');
     } else if (scenario !== 'cold' && scenario !== 'slow') {
       await page.waitForFunction(() => { const s=window.store.getState(); return s.statsPresentation?.stats === s.stats && s.statsPresentation?.libraries === s.hiddenLibraries; });
@@ -151,9 +151,8 @@ try {
     if (scenario === 'slow') {
       const fallbackCount = await page.locator('.stats-row-cover-unavailable').count();
       assert.ok(fallbackCount > 0, 'timed-out covers must have a stable fallback');
-      await page.waitForTimeout(1900);
-      assert.equal(await page.locator('.stats-row-cover-unavailable').count(), fallbackCount, 'late decode must not replace the visible fallback');
-      assert.ok(await page.locator('.stats-row-cover-unavailable img').evaluateAll((images) => images.every((image) => getComputedStyle(image).visibility === 'hidden')));
+      await page.waitForFunction(() => document.querySelectorAll('.stats-row-cover-unavailable').length === 0);
+      assert.ok(await page.locator('img[data-stats-image]').evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0 && getComputedStyle(image).visibility === 'visible')), 'late success must replace temporary placeholders');
     }
     if (scenario === 'warm') {
       const readyState = await page.evaluate(() => {
@@ -180,7 +179,7 @@ try {
     results.push({scenario, sampledFrames:frames.length, blankFrames:frames.filter((frame)=>Math.max(frame.old,frame.incoming)<0.999).length});
     await page.close();
   }
-  console.log(JSON.stringify({productionPreviousView:'GameView', scenarios:results, firstFrameCoversReady:true, cancelledNavigationStaysCancelled:true, stalePreparationRejected:true, restoreFinishesWithoutSuppressingNextEntry:true, archiveVisible:true, slowCoverFallbackStable:true}));
+  console.log(JSON.stringify({productionPreviousView:'GameView', scenarios:results, firstFrameCoversReady:true, cancelledNavigationStaysCancelled:true, stalePreparationRejected:true, restoreFinishesWithoutSuppressingNextEntry:true, archiveVisible:true, slowCoverFallbackRecovers:true}));
 } finally {
   await browser?.close();
   await server.close();

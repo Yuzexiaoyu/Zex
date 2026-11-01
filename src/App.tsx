@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from './store';
 import GameView from './views/GameView';
 import SeriesView from './views/SeriesView';
-import MusicView from './views/MusicView';
+import MusicSurface from './components/MusicSurface';
 import { firstVisibleStatsGroup } from './views/StatsView';
 import StatsSurface from './components/StatsSurface';
 import SettingsView from './views/SettingsView';
@@ -16,6 +16,7 @@ import zexLogo from './assets/zex-logo.png';
 import { coverSrc } from './utils/media';
 import { startStatsRefresh } from './utils/statsRefresh';
 import { usePresentedView } from './utils/usePresentedView';
+import SeriesImageWarmup from './components/SeriesImageWarmup';
 import { restoreWindowAfterPaint } from './utils/restoreWindow';
 import { clsx } from 'clsx';
 import { listen } from '@tauri-apps/api/event';
@@ -67,6 +68,7 @@ export default function App() {
   // 逐字段订阅：无 selector 的 useAppStore() 会订阅整个 store，任一字段变都重渲染。
   // App 是根组件，音乐播放时 nowPlaying.positionMs 每秒变一次会带着整棵树重画
   const activeView = useAppStore((s) => s.activeView);
+  const libraryViewportRef = useRef<HTMLElement>(null);
   const presentedView = usePresentedView(activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
   const theme = useAppStore((s) => s.theme);
@@ -160,15 +162,13 @@ export default function App() {
     void initLang();
   }, []);
 
-  // 启动预加载：各库数据常驻 store 后再让用户切页。
-  // 各视图只在 mount 时才 loadX，首次切到影视/音乐库要先等 IPC 往返，
-  // 期间 store 还是空数组 → 会闪一帧「空库」占位 UI。
-  // 本地 SQLite 查询毫秒级，启动时并行拉全量代价可忽略（游戏库启动反正要显示）
+  // 启动并行拉取各库数据；音乐、统计常驻层随后准备实际布局和首屏图片。
+  // 音乐层与启动流程共用在途请求，不因挂载或切页重复查询。
   useEffect(() => {
     const store = useAppStore.getState();
     void Promise.all([
       store.loadGames(),
-      store.loadSeries(),
+      store.ensureSeriesLoaded(),
       store.loadTracks(),
       store.loadPlaylists(),
       store.loadStats(),
@@ -409,15 +409,18 @@ export default function App() {
 
       {/* Main content —— app-blank 时整棵子树 visibility:hidden，GPU 缓冲存空白帧 */}
       <main
+        ref={libraryViewportRef}
         className="relative z-10 flex-1 min-h-0 overflow-hidden"
       >
+        <SeriesImageWarmup viewportRef={libraryViewportRef} />
         {/* 这层刻意不做入场动画：外层 translateY/opacity 会把整棵子树（含 hero
             的渐变遮罩）逐帧重新光栅化，遮罩边缘会出现抖动。各视图内部
             （hero-in / hero-content / card-enter）已有自己的入场动画 */}
         <div className="h-full" data-presented-view={presentedView} inert={activeView !== presentedView}>
           {presentedView === 'games' && <GameView onAddGame={() => setShowAddModal(true)} />}
           {presentedView === 'series' && <SeriesView />}
-          {presentedView === 'music' && <MusicView />}
+          {/* 首屏与封面在后台准备，切入直接复用；隐藏期间不参与交互。 */}
+          {!hiddenLibraries.includes('music') && <MusicSurface active={presentedView === 'music'} />}
           {/* 统计页首屏常驻预渲染，切入时复用合成层并统一播放整页入场。 */}
           <StatsSurface active={presentedView === 'stats'} />
           {/* 设置页常挂载：软件启动时就渲染、读回全部设置、并完成动态留空的测量，

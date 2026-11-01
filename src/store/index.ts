@@ -18,10 +18,17 @@ export interface MusicNowPlayingState {
   playing: boolean;
 }
 
+export type MusicLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+
 // 音量持久化防抖：拖动时 commit 节流调用，这里只写最终值（避免高频写 SQLite）
 let musicVolPersistTimer: number | null = null;
 // 启动预读和切入统计页共用请求，避免同一时刻重复查询并触发两轮首屏解码。
 let statsRequest: Promise<void> | null = null;
+let seriesRequest: Promise<void> | null = null;
+let seriesRefreshQueued = false;
+// 启动预渲染与音乐库刷新共用在途请求，避免重复查询打断首屏准备。
+let tracksRequest: Promise<void> | null = null;
+let playlistsRequest: Promise<void> | null = null;
 
 // 当前曲的带时间轴内嵌歌词行；无播放 / 无词 / 请求失败 → null（自动开词与词按钮共用校验）
 async function currentTimedLyrics(): Promise<LrcLine[] | null> {
@@ -38,8 +45,18 @@ interface AppState {
   games: Game[];
   gameFolders: GameFolder[];  // 游戏库文件夹（成员 id 在 folder.game_ids 里）
   series: SeriesCard[];   // 含季数/集数/已看数等统计（get_series_library）
+  seriesLoaded: boolean;
   tracks: Track[];        // 音乐曲目
   playlists: Playlist[];  // 歌单（含每歌单曲目 id，前端本地过滤）
+  tracksStatus: MusicLoadStatus;
+  playlistsStatus: MusicLoadStatus;
+  tracksError: string | null;
+  playlistsError: string | null;
+  musicPresentation: {
+    tracks: Track[];
+    playlists: Playlist[];
+    layout: MusicLayout;
+  } | null;
   stats: Stats | null;
   statsPresentation: {
     stats: Stats | null;
@@ -81,11 +98,14 @@ interface AppState {
   // ─── Actions ────────────────────────────
   loadGames: () => Promise<void>;
   loadGameFolders: () => Promise<void>;
+  ensureSeriesLoaded: () => Promise<void>;
   loadSeries: () => Promise<void>;
   loadTracks: () => Promise<void>;
   loadPlaylists: () => Promise<void>;
   loadStats: () => Promise<void>;
   prepareStatsPresentation: (stats: Stats | null, libraries: AppState['hiddenLibraries'], unavailableCovers?: readonly string[]) => void;
+  prepareMusicPresentation: (tracks: Track[], playlists: Playlist[], layout: MusicLayout) => void;
+  invalidateMusicPresentation: () => void;
 
   setActiveView: (view: AppState['activeView']) => void;
   setMetadataFetching: (title: string | null) => void;
@@ -168,8 +188,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   games: [],
   gameFolders: [],
   series: [],
+  seriesLoaded: false,
   tracks: [],
   playlists: [],
+  tracksStatus: 'idle',
+  playlistsStatus: 'idle',
+  tracksError: null,
+  playlistsError: null,
+  musicPresentation: null,
   stats: null,
   statsPresentation: null,
   runningGameId: null,
@@ -240,19 +266,79 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ gameFolders });
   },
 
-  loadSeries: async () => {
-    const series = await api.getSeriesLibrary();
-    set({ series });
+  ensureSeriesLoaded: () => {
+    if (get().seriesLoaded) return Promise.resolve();
+    return seriesRequest ?? get().loadSeries();
   },
 
-  loadTracks: async () => {
-    const tracks = await api.getAllTracks();
-    set({ tracks });
+  loadSeries: () => {
+    // 初次挂载用 ensure 共享已有查询；显式刷新代表查询开始后又有数据变更。
+    if (seriesRequest) {
+      seriesRefreshQueued = true;
+      return seriesRequest;
+    }
+    seriesRefreshQueued = false;
+    seriesRequest = Promise.resolve().then(async () => {
+      try {
+        for (;;) {
+          let series: SeriesCard[];
+          try {
+            series = await api.getSeriesLibrary();
+          } catch (error) {
+            if (!seriesRefreshQueued) throw error;
+            seriesRefreshQueued = false;
+            continue;
+          }
+          // 多次变更合并成下一次查询，不发布已经知道过期的快照。
+          if (seriesRefreshQueued) {
+            seriesRefreshQueued = false;
+            continue;
+          }
+          set({ series, seriesLoaded: true });
+          if (!seriesRefreshQueued) return;
+          // 同步订阅者在发布期间要求刷新，也纳入本次完成承诺。
+          seriesRefreshQueued = false;
+        }
+      } finally {
+        seriesRequest = null;
+        seriesRefreshQueued = false;
+      }
+    });
+    return seriesRequest;
   },
 
-  loadPlaylists: async () => {
-    const playlists = await api.getPlaylists();
-    set({ playlists });
+  loadTracks: () => {
+    if (tracksRequest) return tracksRequest;
+    tracksRequest = Promise.resolve().then(async () => {
+      try {
+        const tracks = await api.getAllTracks();
+        set({ tracks, tracksStatus: 'ready', tracksError: null, musicPresentation: null });
+      } catch (error) {
+        set({ tracksStatus: 'error', tracksError: error instanceof Error ? error.message : String(error) });
+        throw error;
+      } finally {
+        tracksRequest = null;
+      }
+    });
+    set({ tracksStatus: 'loading', tracksError: null });
+    return tracksRequest;
+  },
+
+  loadPlaylists: () => {
+    if (playlistsRequest) return playlistsRequest;
+    playlistsRequest = Promise.resolve().then(async () => {
+      try {
+        const playlists = await api.getPlaylists();
+        set({ playlists, playlistsStatus: 'ready', playlistsError: null, musicPresentation: null });
+      } catch (error) {
+        set({ playlistsStatus: 'error', playlistsError: error instanceof Error ? error.message : String(error) });
+        throw error;
+      } finally {
+        playlistsRequest = null;
+      }
+    });
+    set({ playlistsStatus: 'loading', playlistsError: null });
+    return playlistsRequest;
   },
 
   loadStats: () => {
@@ -272,6 +358,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     // 过期解码回调不能把新数据或新列布局误报为已就绪。
     if (get().stats !== stats || get().hiddenLibraries !== libraries) return;
     set({ statsPresentation: { stats, libraries, unavailableCovers: new Set(unavailableCovers) } });
+  },
+
+  prepareMusicPresentation: (tracks, playlists, layout) => {
+    const current = get();
+    // 空库也是成功结果；失败终态交给页面显示，不能让切库永久等待。
+    if ((current.tracksStatus !== 'ready' && current.tracksStatus !== 'error')
+      || (current.playlistsStatus !== 'ready' && current.playlistsStatus !== 'error')) return;
+    // 旧数据或旧布局的异步封面回调不能释放当前页面。
+    if (current.tracks !== tracks || current.playlists !== playlists || current.musicLayout !== layout) return;
+    const presented = current.musicPresentation;
+    if (presented?.tracks === tracks && presented.playlists === playlists && presented.layout === layout) return;
+    set({ musicPresentation: { tracks, playlists, layout } });
+  },
+
+  invalidateMusicPresentation: () => {
+    if (get().musicPresentation !== null) set({ musicPresentation: null });
   },
 
   setActiveView: (activeView) => set({ activeView }),
@@ -303,7 +405,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // 音乐库列表形态：立即生效 + 落库（失败只影响下次启动的默认值）
   setMusicLayout: (v) => {
-    set({ musicLayout: v });
+    if (get().musicLayout !== v) set({ musicLayout: v, musicPresentation: null });
     void api.setSetting('music_layout', v).catch(() => {});
   },
 
@@ -374,7 +476,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (brandCover) set({ brandCover });
     // 音乐库形态：白名单校验，未存过（null）保持默认单列
     const ml = await api.getSetting('music_layout').catch(() => null);
-    if (ml === 'single' || ml === 'multi') set({ musicLayout: ml });
+    if ((ml === 'single' || ml === 'multi') && get().musicLayout !== ml) {
+      set({ musicLayout: ml, musicPresentation: null });
+    }
   },
 
   createGame: async (game) => {

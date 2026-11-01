@@ -190,11 +190,12 @@ export function useFocusIndex(group: string): number {
   });
 }
 
-/** 容器注册焦点组；opts 对象每次渲染新引用 → effect 每帧重跑，registry 始终持有最新回调
- *  （若只在 count/cols 变化时注册，会残留旧闭包快照，动态行/列表的行内交互会失效） */
-export function useGamepadGroup(id: string, opts: GroupOpts) {
+/** 容器注册焦点组；opts 对象每次渲染新引用 → effect 每帧重跑，registry 始终持有最新回调。
+ *  enabled=false 时完全撤销注册，后台常驻页面不会覆盖同名的前台焦点组。 */
+export function useGamepadGroup(id: string, opts: GroupOpts, enabled = true) {
   useEffect(() => {
+    if (!enabled) return;
     useFocusStore.getState().register(id, opts);
     return () => useFocusStore.getState().unregister(id);
-  }, [id, opts]);
+  }, [id, opts, enabled]);
 }

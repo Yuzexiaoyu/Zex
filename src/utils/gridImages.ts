@@ -1,7 +1,13 @@
 // 首屏图片实际解码完成后再开始卡片入场；只处理可见卡，不扫描整个游戏库。
 export function prepareGridImages(grid: HTMLElement, onReady: () => void): () => void {
+  return prepareVisibleImages(grid, '.game-card, .folder-card', onReady);
+}
+
+// 同一套解码交接用于游戏卡片和音乐行；overscan 节点不延迟首屏。
+export function prepareVisibleImages(grid: HTMLElement, itemSelector: string, onReady: () => void): () => void {
   let disposed = false;
   let frame = 0;
+  let timer: number | undefined;
   const decoded = new WeakMap<HTMLImageElement, string>();
   const decoding = new WeakMap<HTMLImageElement, string>();
   const finish = () => {
@@ -15,9 +21,15 @@ export function prepareGridImages(grid: HTMLElement, onReady: () => void): () =>
   const check = () => {
     frame = 0;
     const bounds = grid.getBoundingClientRect();
-    if (bounds.width <= 0 || bounds.height <= 0) return;
+    if (bounds.width <= 0 || bounds.height <= 0) {
+      window.clearTimeout(timer);
+      timer = undefined;
+      return;
+    }
+    // 有有效布局后才开始计时；最小化期间不能把未准备的图片误报为就绪。
+    timer ??= window.setTimeout(finish, 2500);
     const images: HTMLImageElement[] = [];
-    for (const card of grid.querySelectorAll<HTMLElement>('.game-card, .folder-card')) {
+    for (const card of grid.querySelectorAll<HTMLElement>(itemSelector)) {
       const rect = card.getBoundingClientRect();
       if (rect.bottom <= bounds.top || rect.top >= bounds.bottom) continue;
       images.push(...card.querySelectorAll<HTMLImageElement>('img'));
@@ -26,6 +38,7 @@ export function prepareGridImages(grid: HTMLElement, onReady: () => void): () =>
     for (const image of images) {
       // CoverImg 会异步把 blob URL 写入 src；未写入时仍要等，不能误判为空图。
       const src = image.getAttribute('src');
+      if (image.dataset.coverStatus === 'error') continue;
       if (!src) { waiting = true; continue; }
       if (decoded.get(image) === src) continue;
       waiting = true;
@@ -44,11 +57,9 @@ export function prepareGridImages(grid: HTMLElement, onReady: () => void): () =>
     if (!waiting) finish();
   };
   const observer = new MutationObserver(schedule);
-  observer.observe(grid, { subtree: true, childList: true, attributes: true, attributeFilter: ['src'] });
+  observer.observe(grid, { subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'data-cover-source', 'data-cover-status'] });
   const resize = new ResizeObserver(schedule);
   resize.observe(grid);
-  // 慢盘/失联图片有上限，避免界面永久不可见。
-  const timer = window.setTimeout(finish, 2500);
   function dispose() {
     disposed = true;
     window.clearTimeout(timer);

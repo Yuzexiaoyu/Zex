@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: https: http://covers.localhost; style-src 'self' 'unsafe-inline'; connect-src 'self' https://www.steamgriddb.com https://api.steampowered.com https://store.steampowered.com https://*.tmdb.org https://*.themoviedb.org ipc: tauri: http://tauri.localhost https://github.com"
+      "csp": "default-src 'self'; img-src 'self' data: blob: https: http://covers.localhost; style-src 'self' 'unsafe-inline'; connect-src 'self' http://covers.localhost https://www.steamgriddb.com https://api.steampowered.com https://store.steampowered.com https://*.tmdb.org https://*.themoviedb.org ipc: tauri: http://tauri.localhost https://github.com"
     }
   },
   "bundle": {

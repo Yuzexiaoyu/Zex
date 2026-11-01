@@ -81,6 +81,7 @@ pub fn get_stats(state: State<'_, AppState>) -> AppResult<Stats> {
                 sub: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 cover_path: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
                 wide_path: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                cover_version: String::new(),
                 seconds: row.get(5)?,
                 count: row.get(6)?,
             })
@@ -91,9 +92,8 @@ pub fn get_stats(state: State<'_, AppState>) -> AppResult<Stats> {
         }
     };
 
-    // 封面墙上限：三列统一 500 条。列内不是虚拟滚动（逐行挂 DOM + 图片），
-    // 需要个兜底量；60 条太少——导入 Steam 游玩数据后游戏列会一次多出上百条库外时长，
-    // 截断看起来就是「条目缺了」
+    // 封面墙上限：三列统一 500 条。前端虚拟化仅挂载可见行；这里限制查询与排名数据量。
+    // 60 条太少——导入 Steam 游玩数据后游戏列会一次多出上百条库外时长。
     const WALL_LIMIT: i64 = 500;
 
     // 「已不在库」判定：某条统计存档对应的实体是否已从库中删除。Steam/tmdb 用 ext_id 认作品，
@@ -141,6 +141,7 @@ pub fn get_stats(state: State<'_, AppState>) -> AppResult<Stats> {
                         sub: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                         cover_path: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
                         wide_path: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                        cover_version: String::new(),
                         seconds: row.get(5)?,
                         count: row.get(6)?,
                     },
@@ -232,7 +233,7 @@ pub fn get_stats(state: State<'_, AppState>) -> AppResult<Stats> {
         )),
     };
 
-    Ok(Stats {
+    let mut stats = Stats {
         game,
         video,
         music,
@@ -245,5 +246,16 @@ pub fn get_stats(state: State<'_, AppState>) -> AppResult<Stats> {
             "SELECT (SELECT COUNT(*) FROM episodes WHERE watched = 1)
                   + (SELECT COALESCE(SUM(watched_episodes), 0) FROM stats_archive a WHERE a.media = 'video' AND {video_gone})",
         )),
-    })
+    };
+    drop(conn);
+    // Selection (including Steam headers and archive fallback) is complete.
+    // Stat only the selected file; never read full image bytes during get_stats.
+    let covers_dir = state.data_dir.join("covers");
+    for media in [&mut stats.game, &mut stats.video, &mut stats.music] {
+        for entry in &mut media.top {
+            let selected = if entry.wide_path.is_empty() { &entry.cover_path } else { &entry.wide_path };
+            entry.cover_version = crate::covers::selected_file_version(&covers_dir, selected);
+        }
+    }
+    Ok(stats)
 }

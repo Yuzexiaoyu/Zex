@@ -213,6 +213,9 @@ try {
   const leave = async () => {
     await page.evaluate(() => window.store.getState().setActiveView('games'));
     await page.waitForSelector('[data-stats-enter]', { state: 'detached' });
+    // Commit the hidden style before the next synthetic navigation. Attribute-only
+    // checks can remove/re-add the same animation within one rendering turn.
+    assert.equal(await page.locator('.stats-page').evaluate((el) => getComputedStyle(el).animationName), 'none');
     assert.equal(await page.locator('[data-stats-row-enter]').count(), 0, 'leaving must clear the previous entrance row selection');
   };
   // 逐帧检查外框、文字、封面有效透明度，不能再出现外框已亮、列表仍透明的中间帧。
@@ -272,7 +275,10 @@ try {
     store.setState({ tracks: [...store.getState().tracks] });
   });
   await page.waitForFunction((calls) => window.statsCalls === calls + 1, callsBeforeEntry);
-  await page.waitForFunction(() => document.querySelector('.stats-row img').src.includes('revision=1') && document.querySelector('.stats-row img').complete);
+  await page.waitForFunction(() => {
+    const image = document.querySelector('.stats-row img');
+    return image.dataset.coverSource.includes('revision=1') && image.complete && image.naturalWidth > 0;
+  });
   const refreshedCalls = await page.evaluate(() => window.statsCalls);
   await enter();
   const startsBeforeRefresh = await page.evaluate(() => window.animationStarts.length);

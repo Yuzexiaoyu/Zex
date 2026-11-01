@@ -46,5 +46,10 @@ scripts/cert/*.pfx
 # 打包脚本产物（release\ZEX_*_绿色版.zip）
 release/
 
+# 本机验证原始产物；保留脚本、Markdown 摘要和 scripts/fixtures 中的小型测试输入。
+/docs/verification/**/*.json
+/docs/verification/**/*.png
+/docs/verification/*-baseline-source/
+
 # OS
 Thumbs.db

@@ -180,6 +180,7 @@ export interface TopEntry {
   sub: string;          // 曲目为艺术家，剧集为"已看 X/Y 集"，游戏为空
   cover_path: string;
   wide_path: string;    // 宽幅封面：游戏 banner / 影视 bg，音乐为空
+  cover_version?: string; // 最终选中封面的文件版本；旧统计快照可省略
   seconds: number;
   count: number;        // 只统计音乐，游戏/影视恒为 0
 }

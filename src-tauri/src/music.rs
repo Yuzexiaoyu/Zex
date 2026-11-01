@@ -1,12 +1,10 @@
 // 音乐库：扫描/导入、封面抽取与压缩（image/lofty）、歌词、歌单，
-// 以及 covers:// 协议文件服务。统计存档走 crate::games::archive_stats_entry。
+// 统计存档走 crate::games::archive_stats_entry；covers:// 文件服务位于 crate::covers。
 use std::borrow::Cow;
 use std::fs;
 use std::path::{Path, PathBuf};
 use chrono::Utc;
-use percent_encoding::percent_decode_str;
 use rusqlite::{params, OptionalExtension};
-use tauri::http::Response;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 use crate::games;
@@ -794,85 +792,4 @@ pub fn delete_playlist(state: State<'_, AppState>, id: String) -> AppResult<()> 
     let conn = state.db.lock();
     conn.execute("DELETE FROM playlists WHERE id = ?", [&id])?; // 关联行 ON DELETE CASCADE
     Ok(())
-}
-
-// covers 协议：只允许读取 data/covers 下的文件（请求路径百分号解码后取文件名，
-// 绕过 asset 协议作用域的 glob 匹配——后者在 Windows 上因 \\?\ 前缀永远拒绝）
-pub(crate) fn serve_covers_file(covers_dir: &Path, request: &tauri::http::Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
-    let encoded = request.uri().path().trim_start_matches('/');
-    let decoded = percent_decode_str(encoded).decode_utf8_lossy().to_string();
-    let file_name = Path::new(&decoded)
-        .file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let path = covers_dir.join(&file_name);
-    if file_name.is_empty() || !path.exists() || !path.starts_with(covers_dir) {
-        return Response::builder()
-            .status(404)
-            .body(Cow::Borrowed(&b"not found"[..]))
-            .unwrap();
-    }
-
-    // 缓存策略：不加缓存头时 WebView 每次滚动都重新读盘（封面目录上千张、数百 MB）。
-    // 但 series_{id}.jpg / music_{id}.jpg 这类文件名在重新获取元数据后会被原地覆盖，
-    // 文件名不变 —— 所以只有带 ?v= 版本号的请求（见 utils/media.ts coverSrc）才能强缓存；
-    // 不带版本号的用 mtime+size 做 ETag 走协商缓存：命中时回 304，不读文件内容。
-    let versioned = request.uri().query().map(|q| q.contains("v=")).unwrap_or(false);
-    let etag = fs::metadata(&path).ok().and_then(|m| {
-        let len = m.len();
-        let ms = m
-            .modified()
-            .ok()?
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?
-            .as_millis();
-        Some(format!("\"{:x}-{:x}\"", ms, len))
-    });
-    let cache_control = if versioned {
-        "public, max-age=31536000, immutable"
-    } else {
-        "public, no-cache"
-    };
-    // If-None-Match 命中 → 304，连 fs::read 都省掉
-    if let Some(tag) = &etag {
-        let matched = request
-            .headers()
-            .get("if-none-match")
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v.split(',').any(|e| e.trim() == tag.as_str()))
-            .unwrap_or(false);
-        if matched {
-            return Response::builder()
-                .status(304)
-                .header("Cache-Control", cache_control)
-                .header("ETag", tag.clone())
-                .header("Access-Control-Allow-Origin", "*") // 前端 fetch 转 objectURL 内存缓存用
-                .body(Cow::Borrowed(&b""[..]))
-                .unwrap();
-        }
-    }
-
-    let bytes = match fs::read(&path) {
-        Ok(b) => b,
-        Err(_) => {
-            return Response::builder()
-                .status(404)
-                .body(Cow::Borrowed(&b"not found"[..]))
-                .unwrap()
-        }
-    };
-    // SGDB 兜底下载的是 PNG，按魔数判断真实类型（文件名统一 .jpg 便于共享复用）
-    let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        "image/png"
-    } else {
-        "image/jpeg"
-    };
-    let mut builder = Response::builder()
-        .header("Content-Type", mime)
-        .header("Cache-Control", cache_control)
-        .header("Access-Control-Allow-Origin", "*"); // 前端 fetch 转 objectURL 内存缓存用
-    if let Some(tag) = etag {
-        builder = builder.header("ETag", tag);
-    }
-    builder.body(Cow::Owned(bytes)).unwrap()
 }

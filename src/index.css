@@ -433,6 +433,11 @@ html.app-blank body > * { visibility: hidden; }
 }
 
 /* ─── Game Card Specific ───────────────────── */
+/* 等首屏封面解码后，边框、文字与图片一起入场；暂停动画以保留完整错峰时长。 */
+[data-grid-preparing] .game-grid { opacity: 0; pointer-events: none; }
+[data-grid-preparing] .game-card,
+[data-grid-preparing] .folder-card { animation-play-state: paused; }
+
 .game-card {
   position: relative;
   border-radius: 16px;
@@ -2476,6 +2481,12 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
    本区块只新增，不覆盖任何已有规则
    ═══════════════════════════════════════════════ */
 
+.stats-surface {
+  isolation: isolate;
+  will-change: opacity;
+}
+.stats-surface[data-stats-hidden] { opacity: 0; pointer-events: none; }
+
 .stats-page {
   height: 100%;
   display: flex;
@@ -2483,7 +2494,21 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
   padding: 18px 22px 20px;
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum';
+  will-change: transform, opacity;
 }
+
+.stats-surface[data-stats-hidden],
+.stats-surface[data-stats-hidden] * { transition: none !important; }
+
+/* 首次准备时保留同样的三列布局，不播放加载动画或显示中间提示。 */
+.stats-placeholder { position: absolute; inset: 0; pointer-events: none; }
+.stats-placeholder-rows { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 6px; }
+.stats-placeholder-row { flex-shrink: 0; }
+.stats-placeholder-cover { flex-shrink: 0; border-radius: 8px; background: var(--color-bg-surface-hover); }
+.stats-placeholder-name,
+.stats-placeholder-total { display: block; height: 12px; border-radius: 4px; background: var(--color-bg-surface-hover); }
+.stats-placeholder-name { width: 60%; }
+.stats-placeholder-total { width: 72px; }
 
 /* ─── 三列并排：左游戏 / 中影视 / 右音乐 ───
    页面不滚动；三列撑满可视高度，头部固定、行列表各自内部滚动。
@@ -2562,6 +2587,10 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
   background: color-mix(in srgb, var(--cc) 80%, transparent);
 }
 
+.stats-virtual-space { position: relative; flex-shrink: 0; }
+.stats-virtual-row { position: absolute; left: 0; right: 0; height: 88px; }
+.stats-virtual-row > .stats-row { height: 88px; }
+
 .stats-row {
   display: flex;
   align-items: center;
@@ -2571,8 +2600,19 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
   border: 1px solid transparent;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease;
-  animation: card-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
+  /* 行高固定 88px；屏外内容由虚拟列表卸载，不再等 visibility 改变时批量绘制。 */
 }
+
+/* 首帧始终不透明。只做位移入场，旧库卸载后不会先露出整片深色底图。 */
+@keyframes stats-enter {
+  from { transform: translateY(8px); }
+  to { transform: translateY(0); }
+}
+.stats-page[data-stats-enter],
+.stats-empty-enter {
+  animation: stats-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
+}
+.stats-row-cover-wide.stats-row-cover-unavailable { width: 128px; }
 
 /* 悬停 / 手柄聚焦：整行高亮 + 左侧色条 */
 .stats-row:hover,
@@ -2902,6 +2942,10 @@ html:not(.dark) .stats-row-cover { background: #e4e8f0; }
 }
 
 /* 从托盘唤回时跳过入场动画：与已有 [data-skip-animations] 规则同理 */
+[data-skip-animations] .stats-page,
+[data-skip-animations] .stats-col-head,
+[data-skip-animations] .stats-col-empty,
+[data-skip-animations] .stats-col-rows,
 [data-skip-animations] .stats-row { animation: none !important; }
 
 /* ─── 浅色主题适配覆盖（只加不改：深色模式的基础规则一字不动） ───

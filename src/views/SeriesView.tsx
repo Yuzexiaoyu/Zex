@@ -18,6 +18,7 @@ import * as api from '../api';
 import TmdbPickerModal from '../components/TmdbPickerModal';
 import type { MediaType, SeriesCard, TmdbSearchResult } from '../types';
 import { coverSrc, yearOf } from '../utils/media';
+import { prepareImages } from '../utils/preloadImages';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useFocusStore, useGamepadGroup, useGamepadFocus, useFocusIndex } from '../gamepad';
 import { useT } from '../i18n';
@@ -193,6 +194,18 @@ export default function SeriesView() {
     () => (focusId ? series.find((s) => s.id === focusId) ?? defaultHero : defaultHero),
     [focusId, series, defaultHero],
   );
+
+  // 鼠标悬停/手柄聚焦时预解码目标详情的两张首屏图，短暂掠过不触发读盘。
+  useEffect(() => {
+    if (!hero) return;
+    const timer = window.setTimeout(() => {
+      void prepareImages([
+        coverSrc(hero.poster_path, hero.updated_at),
+        coverSrc(hero.bg_path || hero.poster_path, hero.updated_at),
+      ]);
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [hero?.id, hero?.poster_path, hero?.bg_path, hero?.updated_at]);
 
   // 悬停即切换；移开不回落，信息停在最后看过的那部，直到悬停另一张海报
   const previewSeries = (id: string) => setHoverId(id);

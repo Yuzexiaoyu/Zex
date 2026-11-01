@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppStore } from './store';
 import GameView from './views/GameView';
 import SeriesView from './views/SeriesView';
 import MusicView from './views/MusicView';
-import StatsView, { firstVisibleStatsGroup } from './views/StatsView';
+import { firstVisibleStatsGroup } from './views/StatsView';
+import StatsSurface from './components/StatsSurface';
 import SettingsView from './views/SettingsView';
 import AddGameModal from './components/AddGameModal';
 import MusicPlaybackBar from './components/MusicPlaybackBar';
@@ -13,6 +14,9 @@ import {
 } from 'lucide-react';
 import zexLogo from './assets/zex-logo.png';
 import { coverSrc } from './utils/media';
+import { startStatsRefresh } from './utils/statsRefresh';
+import { usePresentedView } from './utils/usePresentedView';
+import { restoreWindowAfterPaint } from './utils/restoreWindow';
 import { clsx } from 'clsx';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -63,6 +67,7 @@ export default function App() {
   // 逐字段订阅：无 selector 的 useAppStore() 会订阅整个 store，任一字段变都重渲染。
   // App 是根组件，音乐播放时 nowPlaying.positionMs 每秒变一次会带着整棵树重画
   const activeView = useAppStore((s) => s.activeView);
+  const presentedView = usePresentedView(activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
   const theme = useAppStore((s) => s.theme);
   const hiddenLibraries = useAppStore((s) => s.hiddenLibraries);
@@ -88,8 +93,6 @@ export default function App() {
   // 用 visibility 而不是卸载，这样详情页/滚动位置等界面状态能原样留到下次唤回
   const setContentVisible = useAppStore((s) => s.setContentVisible);
   const hideToTray = useAppStore((s) => s.hideToTray);
-  // 从托盘恢复时跳过入场动画（hero-in / fade-up 等），避免 mid-animation 的遮罩错位闪烁
-  const skipAnimRef = useRef(false);
 
   // 不等待用户打开磁盘管理才枚举卷；后台预读不阻塞主界面初始化。
   useEffect(() => {
@@ -133,14 +136,14 @@ export default function App() {
     cols: visibleNav.length,
     activate: (i) => setActiveView(visibleNav[i].id),
     leave: (dir) => {
-      if (dir === 'down') useFocusStore.getState().switchTo(groupOf(activeView));
+      if (dir === 'down' && activeView === presentedView) useFocusStore.getState().switchTo(groupOf(presentedView));
     },
   });
 
   // 视图切换（手柄或鼠标）→ 手柄焦点落进该视图内容区
   useEffect(() => {
-    useFocusStore.getState().reset(groupOf(activeView));
-  }, [activeView, statsGroup]);
+    useFocusStore.getState().reset(activeView === presentedView ? groupOf(presentedView) : 'nav');
+  }, [activeView, presentedView, statsGroup]);
 
   // 当前入口被隐藏时：自动切到第一个可见入口（设置页固定可见，兜底不会死循环）
   useEffect(() => {
@@ -171,6 +174,9 @@ export default function App() {
       store.loadStats(),
     ]).catch(() => {});
   }, []);
+
+  // 更新库/结束播放后后台准备统计缓存，切入统计页无需额外查询。
+  useEffect(startStatsRefresh, []);
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -229,16 +235,11 @@ export default function App() {
   // 唤回窗口：先恢复内容区 → 等浏览器合成完这一帧 → 才让后端 show()。
   // 顺序反了就会闪出隐藏前的旧画面（窗口 hide 期间 WebView2 不合成新帧）
   const restoreWindow = useCallback(() => {
-    skipAnimRef.current = true;
-    setContentVisible(true);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        invoke('show_main_window_cmd');
-        requestAnimationFrame(() => {
-          skipAnimRef.current = false;
-        });
-      });
-    });
+    void restoreWindowAfterPaint(
+      () => setContentVisible(true),
+      () => invoke('show_main_window_cmd'),
+      () => useAppStore.getState().contentVisible,
+    ).catch((error) => console.error('Window restore failed:', error));
   }, [setContentVisible]);
 
   // 托盘右键菜单的「游戏库 / 影视库」
@@ -409,16 +410,16 @@ export default function App() {
       {/* Main content —— app-blank 时整棵子树 visibility:hidden，GPU 缓冲存空白帧 */}
       <main
         className="relative z-10 flex-1 min-h-0 overflow-hidden"
-        data-skip-animations={skipAnimRef.current ? '' : undefined}
       >
         {/* 这层刻意不做入场动画：外层 translateY/opacity 会把整棵子树（含 hero
             的渐变遮罩）逐帧重新光栅化，遮罩边缘会出现抖动。各视图内部
             （hero-in / hero-content / card-enter）已有自己的入场动画 */}
-        <div className="h-full">
-          {activeView === 'games' && <GameView onAddGame={() => setShowAddModal(true)} />}
-          {activeView === 'series' && <SeriesView />}
-          {activeView === 'music' && <MusicView />}
-          {activeView === 'stats' && <StatsView />}
+        <div className="h-full" data-presented-view={presentedView} inert={activeView !== presentedView}>
+          {presentedView === 'games' && <GameView onAddGame={() => setShowAddModal(true)} />}
+          {presentedView === 'series' && <SeriesView />}
+          {presentedView === 'music' && <MusicView />}
+          {/* 统计页首屏常驻预渲染，切入时复用合成层并统一播放整页入场。 */}
+          <StatsSurface active={presentedView === 'stats'} />
           {/* 设置页常挂载：软件启动时就渲染、读回全部设置、并完成动态留空的测量，
               切换视图只是把它显出来 —— 切过去直接是最终状态，没有首帧黑闪、
               没有开关先闪默认值再跳真实值，也没有「切过去才拉伸」的跳变。
@@ -431,8 +432,8 @@ export default function App() {
               期间保持可见、结束才隐藏（切走时标签残留 0.2s）。规则见 index.css */}
           <div
             className="absolute inset-0"
-            data-settings-hidden={activeView === 'settings' ? undefined : ''}
-            style={{ visibility: activeView === 'settings' ? undefined : 'hidden' }}
+            data-settings-hidden={presentedView === 'settings' ? undefined : ''}
+            style={{ visibility: presentedView === 'settings' ? undefined : 'hidden' }}
           >
             <SettingsView />
           </div>

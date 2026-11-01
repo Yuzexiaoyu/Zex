@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { createPortal } from 'react-dom';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { coverSrc } from '../utils/media';
+import { prepareImages } from '../utils/preloadImages';
 import { EyeOff, Play, Clock, Gamepad2 } from 'lucide-react';
 import type { Game } from '../types';
 import { useInputMode } from '../gamepad';
@@ -115,6 +116,14 @@ export default function GameCard({ game, onClick, onLaunch, onContextMenu, onPoi
   // 拖拽中（自身拖动或 GameGrid 整体拖拽）不显示预览
   const showPreview = preview && !dragging && !previewDisabled;
 
+  useEffect(() => {
+    if (!showPreview) return;
+    const timer = window.setTimeout(() => {
+      void prepareImages([coverSrc(game.cover_path || game.banner_path, game.updated_at)]);
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [!!showPreview, game.cover_path, game.banner_path, game.updated_at]);
+
   return (
     <>
       <div
@@ -133,7 +142,7 @@ export default function GameCard({ game, onClick, onLaunch, onContextMenu, onPoi
         <div className="relative overflow-hidden">
           {game.cover_path ? (
             <img
-              src={convertFileSrc(game.cover_path, 'covers')}
+              src={coverSrc(game.cover_path, game.updated_at)}
               alt={game.name}
               className="game-card-cover"
               loading="lazy"
@@ -192,7 +201,7 @@ export default function GameCard({ game, onClick, onLaunch, onContextMenu, onPoi
           <div className="game-preview-content">
             {game.banner_path ? (
               <img
-                src={convertFileSrc(game.banner_path, 'covers')}
+                src={coverSrc(game.banner_path, game.updated_at)}
                 alt={game.name}
                 className="game-preview-banner"
                 loading="lazy"

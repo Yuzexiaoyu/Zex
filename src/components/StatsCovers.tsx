@@ -1,8 +1,9 @@
+import { memo, useState } from 'react';
 import { clsx } from 'clsx';
 import { Gamepad2, Film, Music2 } from 'lucide-react';
 import type { TopEntry } from '../types';
-import { coverSrc } from '../utils/media';
-import { t } from '../i18n';
+import { statsCoverSrc } from '../utils/statsImages';
+import { t, useT } from '../i18n';
 
 // 三类媒体的统一配色：游戏＝主题青，影视＝紫，音乐＝绿（复用 --color-success 色值）
 export const MEDIA_COLORS = {
@@ -46,35 +47,52 @@ const FALLBACK_ICON = {
  *  宽幅缺失时回退到竖版 cover_path 裁切，都没有再回退占位。
  *  信息常驻可见（名称/副标题/时长），悬停或手柄聚焦时整行高亮。
  *  anchor 是手柄滚动定位用的 data 属性值（格式 `${media}-${index}`） */
-export function RowCard({ entry, media, color, rank, focused, anchor, onContextMenu }: {
+export const RowCard = memo(function RowCard({ entry, media, color, rank, focused, anchor, onContextMenu, coverUnavailable = false }: {
   entry: TopEntry;
   media: MediaKey;
   color: string;
   rank: number;
   focused?: boolean;
   anchor?: string;
-  onContextMenu?: (e: React.MouseEvent) => void;
+  onContextMenu?: (e: React.MouseEvent, entry: TopEntry) => void;
+  coverUnavailable?: boolean;
 }) {
+  const t = useT();
   const Icon = FALLBACK_ICON[media];
-  const imgSrc = entry.wide_path || entry.cover_path;
+  const imgSrc = statsCoverSrc(entry);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
 
   return (
     <div
       className={clsx('stats-row', focused && 'stats-row-focus')}
       style={{ ['--cc' as string]: color }}
       data-stat-cover={anchor}
-      onContextMenu={onContextMenu}
+      onContextMenu={onContextMenu ? (event) => onContextMenu(event, entry) : undefined}
     >
       {/* 容器比例跟随图片形态：宽幅封面（banner/bg）用 16:9；音乐用方形；
           无宽幅图回退竖版封面时用 2:3 竖版容器 —— 配 contain 全程不裁切、不留怪边 */}
       <div className={clsx(
         'stats-row-cover',
+        coverUnavailable && 'stats-row-cover-unavailable',
         media === 'music' ? 'stats-row-cover-square'
           : entry.wide_path ? 'stats-row-cover-wide'
           : 'stats-row-cover-portrait',
       )}>
-        {imgSrc ? (
-          <img className="stats-row-img" src={coverSrc(imgSrc)} alt="" loading="lazy" draggable={false} />
+        {imgSrc && failedSrc !== imgSrc ? (
+          <>
+            <img
+              className="stats-row-img"
+              data-stats-image
+              src={imgSrc}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              onError={() => setFailedSrc(imgSrc)}
+              style={coverUnavailable ? { visibility: 'hidden' } : undefined}
+            />
+            {coverUnavailable && <div className="stats-row-img stats-row-blank absolute inset-0"><Icon size={18} /></div>}
+          </>
         ) : (
           <div className="stats-row-img stats-row-blank"><Icon size={18} /></div>
         )}
@@ -100,4 +118,21 @@ export function RowCard({ entry, media, color, rank, focused, anchor, onContextM
       </div>
     </div>
   );
-}
+  // 按值比较而不是按引用：统计页每次刷新都会拿到全新的 stats 对象（IPC 反序列化），
+  // 引用比较会让最多 3×500 行全部重渲染，正好卡在切页 / 刷新那一帧。
+  // 这里只比真正影响渲染的字段，内容没变的行整块跳过。
+}, (a, b) =>
+  a.entry.id === b.entry.id
+  && a.entry.name === b.entry.name
+  && a.entry.sub === b.entry.sub
+  && a.entry.seconds === b.entry.seconds
+  && a.entry.count === b.entry.count
+  && a.entry.wide_path === b.entry.wide_path
+  && a.entry.cover_path === b.entry.cover_path
+  && a.media === b.media
+  && a.color === b.color
+  && a.rank === b.rank
+  && a.focused === b.focused
+  && a.anchor === b.anchor
+  && a.coverUnavailable === b.coverUnavailable
+  && a.onContextMenu === b.onContextMenu);

@@ -129,13 +129,14 @@ function requestLoad(url: string): { promise: Promise<string | null>; release: (
     item = { url, promise, resolve, waiters: 0, started: false };
     byUrl.set(url, item);
     waitStack.push(item);
-    pump();
   } else if (!item.started) {
     // 已排队未起飞：提到栈顶（又被请求一次 = 更可能可见）
     const i = waitStack.indexOf(item);
     if (i >= 0) { waitStack.splice(i, 1); waitStack.push(item); }
   }
   item.waiters += 1;
+  // pump 会丢弃无等待者的请求，必须先登记首个等待者再启动。
+  pump();
   const target = item;
   let released = false;
   const release = () => { if (!released) { released = true; target.waiters -= 1; } };

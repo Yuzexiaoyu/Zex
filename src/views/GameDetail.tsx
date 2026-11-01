@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import { message, open } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '../store';
 import type { Game } from '../types';
-import { formatDuration } from '../utils/media';
+import { coverSrc, formatDuration } from '../utils/media';
+import { isImagePrepared, prepareImages } from '../utils/preloadImages';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useFocusStore, useGamepadGroup, useFocusIndex, useRightStickScroll } from '../gamepad';
 import { useT, useLang } from '../i18n';
@@ -45,6 +45,9 @@ export default function GameDetail({ gameId, onClose }: Props) {
   const launchGame = useAppStore((s) => s.launchGame);
   const loadGames = useAppStore((s) => s.loadGames);
   const game = games.find((g) => g.id === gameId);
+  const imageSrc = game ? coverSrc(game.cover_path || game.banner_path, game.updated_at) : '';
+  const [preparedCover, setPreparedCover] = useState('');
+  const coverReady = !imageSrc || preparedCover === imageSrc || isImagePrepared(imageSrc);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Partial<Game>>({});
   const [deleting, setDeleting] = useState(false);
@@ -53,6 +56,12 @@ export default function GameDetail({ gameId, onClose }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // 右摇杆滚动目标：详情弹窗打开时压栈、关闭恢复底层
   useRightStickScroll(scrollRef);
+
+  useEffect(() => {
+    let alive = true;
+    void prepareImages([imageSrc]).then(() => { if (alive) setPreparedCover(imageSrc); });
+    return () => { alive = false; };
+  }, [imageSrc]);
 
   useEffect(() => {
     if (game) {
@@ -76,9 +85,10 @@ export default function GameDetail({ gameId, onClose }: Props) {
   // 纵向操作组：启动(0) → 编辑(1) → 删除(2) → 关闭(3)，与视觉位置自上而下一致
   const detailFocused = useFocusIndex('game-detail');
   useGamepadGroup('game-detail', {
-    count: game ? 4 : 0,
+    count: game && coverReady ? 4 : 0,
     cols: 1,
     activate: (i) => {
+      if (!coverReady) return;
       if (i === 0) void handleLaunch();
       else if (i === 1) setEditing((e) => !e);
       else if (i === 2) void handleDelete();
@@ -95,7 +105,7 @@ export default function GameDetail({ gameId, onClose }: Props) {
     };
   }, []);
 
-  if (!game) return null;
+  if (!game || !coverReady) return null;
 
   // 浏览选择安装目录（整个游戏文件夹）
   const handleBrowseInstallDir = async () => {
@@ -180,7 +190,6 @@ export default function GameDetail({ gameId, onClose }: Props) {
   };
 
   const tags: string[] = JSON.parse(game.tags || '[]');
-  const coverSrc = game.cover_path || game.banner_path;
   // 归档信息展示用：原始/压缩大小与节省比例（原始未知时不显示比例）
   const archOrig = game.archive_original_size || 0;
   const archComp = game.archive_size || 0;
@@ -209,11 +218,14 @@ export default function GameDetail({ gameId, onClose }: Props) {
           <div className="relative flex gap-6">
             {/* 封面卡：与网格同源的竖版封面 */}
             <div className="w-40 shrink-0 self-start rounded-xl overflow-hidden shadow-2xl border border-border-glass bg-bg-surface">
-              {coverSrc ? (
+              {imageSrc ? (
                 <img
-                  src={convertFileSrc(coverSrc, 'covers')}
+                  src={imageSrc}
                   alt={game.name}
                   className="w-full aspect-[2/3] object-cover"
+                  loading="eager"
+                  decoding="sync"
+                  fetchPriority="high"
                 />
               ) : (
                 <div className="w-full aspect-[2/3] flex items-center justify-center bg-gradient-to-br from-bg-surface to-bg-surface-active">

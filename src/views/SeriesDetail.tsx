@@ -8,6 +8,7 @@ import { clsx } from 'clsx';
 import * as api from '../api';
 import type { Episode, NextEpisode, SeriesDetailData } from '../types';
 import { cleanEpisodeTitle, coverSrc, formatDuration, formatRuntime, watchPercent, yearOf } from '../utils/media';
+import { prepareImages } from '../utils/preloadImages';
 import { useEscIntercept } from '../utils/escIntercept';
 import { useFocusStore, useGamepadGroup, useFocusIndex, useRightStickScroll } from '../gamepad';
 import { useT } from '../i18n';
@@ -23,13 +24,22 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
   const [data, setData] = useState<SeriesDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeSeason, setActiveSeason] = useState('');
+  const loadRequest = useRef(0);
+  const mounted = useRef(false);
   // 整页滚动容器（右摇杆滚动目标）
   const scrollRef = useRef<HTMLDivElement>(null);
   // 右摇杆滚动目标：详情页打开时压栈、关闭恢复底层（影视库网格）
   useRightStickScroll(scrollRef);
 
   const load = useCallback(async (keepSeason = true) => {
+    const request = ++loadRequest.current;
     const detail = await api.getSeriesDetail(seriesId);
+    // 首屏图读盘、解码完成后再显示内容，避免标题先出现、封面随后补上。
+    await prepareImages([
+      coverSrc(detail.poster_path, detail.updated_at),
+      coverSrc(detail.bg_path || detail.poster_path, detail.updated_at),
+    ]);
+    if (!mounted.current || request !== loadRequest.current) return detail;
     setData(detail);
     setActiveSeason((prev) => {
       if (keepSeason && prev && detail.seasons.some((s) => s.id === prev)) return prev;
@@ -41,11 +51,12 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
 
   useEffect(() => {
     let alive = true;
+    mounted.current = true;
     setLoading(true);
     load(false)
-      .catch((err) => { void message(t('series.loadFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' }); })
+      .catch((err) => { if (alive) void message(t('series.loadFailed', { msg: String(err) }), { title: t('common.error'), kind: 'error' }); })
       .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    return () => { alive = false; mounted.current = false; ++loadRequest.current; };
   }, [load]);
 
   // Esc 返回列表
@@ -311,7 +322,7 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
           （detail-backdrop-fallback，深色模式 display:none 保持现状） */}
       {backdrop ? (
         <div className="detail-backdrop">
-          <img src={coverSrc(backdrop, data.updated_at)} alt="" />
+          <img src={coverSrc(backdrop, data.updated_at)} alt="" loading="eager" decoding="sync" fetchPriority="high" />
           <div className="detail-backdrop-fade" />
         </div>
       ) : (
@@ -335,6 +346,9 @@ export default function SeriesDetail({ seriesId, onClose, onChanged }: Props) {
                 src={coverSrc(data.poster_path, data.updated_at)}
                 alt={data.title}
                 className="detail-poster"
+                loading="eager"
+                decoding="sync"
+                fetchPriority="high"
               />
             ) : (
               <div className="detail-poster flex items-center justify-center bg-gradient-to-br from-[#2a1a4e] to-[#0d0d2b] detail-poster-fallback">

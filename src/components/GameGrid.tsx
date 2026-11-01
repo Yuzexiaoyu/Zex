@@ -20,6 +20,7 @@ import { useEscIntercept } from '../utils/escIntercept';
 import { useFocusIndex, useGamepadGroup } from '../gamepad';
 import { buildLibraryLayout, folderGames, slotOf } from '../utils/libraryCells';
 import { useT } from '../i18n';
+import { prepareGridImages } from '../utils/gridImages';
 
 interface Props {
   /** 本视图要展示的游戏（顶层传全部可见游戏，布局自己把文件夹成员摘出去） */
@@ -153,22 +154,9 @@ export default function GameGrid({
   //      滚动挂载进来的卡若也加动画，格号一大就是几百 ms 的透明期 = 滚下去一片空白
   const [introCells, setIntroCells] = useState(0);
   const [introDone, setIntroDone] = useState(false);
+  const [introImagesReady, setIntroImagesReady] = useState(false);
   // 一格的实测宽度：文件夹卡要用它决定拼图墙摆几张
   const [cellWidth, setCellWidth] = useState(0);
-  // 首屏放得下几格。layout effect：首帧绘制前跑，且首帧虚拟化器量不到高度、
-  // 一张卡都不渲染，所以不存在「先画了没动画的卡再补动画」的闪
-  useLayoutEffect(() => {
-    const measure = () => {
-      const el = parentRef.current;
-      if (!el) return;
-      setIntroCells(Math.ceil(el.clientHeight / (rowHeight + gap)) * colCount);
-      setCellWidth((el.clientWidth - padX * 2 - gap * (colCount - 1)) / colCount);
-    };
-    measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [colCount]);
-
   // ─── 布局：文件夹钉在格号上，游戏顺序填空 ───
   // 拖拽中用工作副本算（指针一动就重算），否则用 props。末尾的空格只在拖拽时补出来：
   // 不补的话文件夹没法摆到现有内容之后，常驻又会让库底下永远挂着空白
@@ -188,11 +176,27 @@ export default function GameGrid({
 
   // 窗口长度按首屏格数推（末格延迟 + 动画 300ms + 余量），写死短了会把尾部卡掐停在半透明
   const hasCards = slots.length > 0;
+  // 冷启动先渲染空态，此时 parentRef 为空；数据回来、网格真正挂载后必须重测。
+  // layout effect 在绘制前补齐首屏格数，让启动沿用切库的 35ms 错峰，而非全体零延迟。
+  useLayoutEffect(() => {
+    const el = parentRef.current;
+    if (!el || !hasCards) return;
+    const measure = () => {
+      setIntroCells(Math.ceil(el.clientHeight / (rowHeight + gap)) * colCount);
+      setCellWidth((el.clientWidth - padX * 2 - gap * (colCount - 1)) / colCount);
+    };
+    measure();
+    // 工具栏出现、窗口恢复以及窗口缩放都可能改变可用尺寸。
+    const resize = new ResizeObserver(measure);
+    resize.observe(el);
+    return () => resize.disconnect();
+  }, [colCount, hasCards]);
+
   useEffect(() => {
-    if (!introCells || !hasCards) return;
+    if (!introCells || !hasCards || !introImagesReady) return;
     const id = setTimeout(() => setIntroDone(true), introCells * 35 + 420);
     return () => clearTimeout(id);
-  }, [introCells, hasCards]);
+  }, [introCells, hasCards, introImagesReady]);
   // 松手落位锁：与状态更新同一批次提交，确保禁过渡帧在 drop 提交时真正生效
   // （旧的命令式 classList.add 会在 React 重写 className 时被抹掉，从未生效过 → 松手一直抽动）
   const [dropLock, setDropLock] = useState(false);
@@ -210,6 +214,13 @@ export default function GameGrid({
     // 封面是 2/3 宽高比，卡片高度随宽度变化，必须按实际测量值布局，否则行与行重叠
     measureElement: (el) => el.getBoundingClientRect().height,
   });
+
+  const renderedRows = virtualizer.getVirtualItems().length;
+  useLayoutEffect(() => {
+    const el = parentRef.current;
+    if (!el || !hasCards || !introCells || !renderedRows || introImagesReady || introDone) return;
+    return prepareGridImages(el, () => setIntroImagesReady(true));
+  }, [hasCards, introCells, renderedRows, introImagesReady, introDone]);
 
   // ─── 文件夹内容弹窗 ────────────────────────
   const folderView = useMemo(
@@ -758,6 +769,7 @@ export default function GameGrid({
     <div
       ref={parentRef}
       className="h-full library-scroll overflow-y-auto"
+      data-grid-preparing={!introImagesReady && !introDone && !everDragged ? '' : undefined}
       style={{ paddingLeft: padX, paddingRight: padX }}
       onContextMenu={handleBlankContextMenu}
       // 首次滚动即结束入场：滚动挂载进来的卡直接走 drag-suppress 的 animation:none
@@ -767,6 +779,7 @@ export default function GameGrid({
       <div
         ref={spacerRef}
         className={clsx(
+          'game-grid',
           gridHinting && 'drag-active',
           // 拖拽时让空格显出虚线框：「可以放这」要看得见（自己拖、或从文件夹浮层往外拖）
           gridHinting && !flat && 'placing',

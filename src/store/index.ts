@@ -20,6 +20,8 @@ export interface MusicNowPlayingState {
 
 // 音量持久化防抖：拖动时 commit 节流调用，这里只写最终值（避免高频写 SQLite）
 let musicVolPersistTimer: number | null = null;
+// 启动预读和切入统计页共用请求，避免同一时刻重复查询并触发两轮首屏解码。
+let statsRequest: Promise<void> | null = null;
 
 // 当前曲的带时间轴内嵌歌词行；无播放 / 无词 / 请求失败 → null（自动开词与词按钮共用校验）
 async function currentTimedLyrics(): Promise<LrcLine[] | null> {
@@ -39,6 +41,11 @@ interface AppState {
   tracks: Track[];        // 音乐曲目
   playlists: Playlist[];  // 歌单（含每歌单曲目 id，前端本地过滤）
   stats: Stats | null;
+  statsPresentation: {
+    stats: Stats | null;
+    libraries: AppState['hiddenLibraries'];
+    unavailableCovers: ReadonlySet<string>;
+  } | null;
   runningGameId: string | null;
 
   // ─── Music Playback ──────────────────────
@@ -78,6 +85,7 @@ interface AppState {
   loadTracks: () => Promise<void>;
   loadPlaylists: () => Promise<void>;
   loadStats: () => Promise<void>;
+  prepareStatsPresentation: (stats: Stats | null, libraries: AppState['hiddenLibraries'], unavailableCovers?: readonly string[]) => void;
 
   setActiveView: (view: AppState['activeView']) => void;
   setMetadataFetching: (title: string | null) => void;
@@ -163,6 +171,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   tracks: [],
   playlists: [],
   stats: null,
+  statsPresentation: null,
   runningGameId: null,
 
   // ─── Initial Music Playback ────────────
@@ -246,9 +255,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ playlists });
   },
 
-  loadStats: async () => {
-    const stats = await api.getStats();
-    set({ stats });
+  loadStats: () => {
+    if (statsRequest) return statsRequest;
+    statsRequest = (async () => {
+      try {
+        const stats = await api.getStats();
+        set({ stats });
+      } finally {
+        statsRequest = null;
+      }
+    })();
+    return statsRequest;
+  },
+
+  prepareStatsPresentation: (stats, libraries, unavailableCovers = []) => {
+    // 过期解码回调不能把新数据或新列布局误报为已就绪。
+    if (get().stats !== stats || get().hiddenLibraries !== libraries) return;
+    set({ statsPresentation: { stats, libraries, unavailableCovers: new Set(unavailableCovers) } });
   },
 
   setActiveView: (activeView) => set({ activeView }),

@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { BarChart3, Gamepad2, Film, Music, Clock, RectangleHorizontal, Trash2 } from 'lucide-react';
 import { message } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '../store';
@@ -10,6 +11,8 @@ import { RowCard, longDur, MEDIA_COLORS } from '../components/StatsCovers';
 import StatsAdjustModal from '../components/StatsAdjustModal';
 import CoverPickerModal from '../components/CoverPickerModal';
 import { useT } from '../i18n';
+import { preloadStatsImages } from '../utils/statsPreload';
+import { statsCoverSrc } from '../utils/statsImages';
 
 // label/unit/countLabel 存 i18n key，渲染时 t() 取词
 const SECTIONS = [
@@ -45,14 +48,17 @@ export function firstVisibleStatsGroup(hidden: Array<'games' | 'series' | 'music
 // 各列当前焦点索引（模块级，不是 React state）：跨列切换时要恢复目标列上次的焦点位置。
 // scrollIntoView 在每次焦点移动后调用（含 switchTo），所以这里永远是最新值
 const colIdx: Record<SectionKey, number> = { game: 0, video: 0, music: 0 };
+const NO_UNAVAILABLE_COVERS: ReadonlySet<string> = new Set();
 
 /** 单列：类别标题 + 总时长 + 封面网格。
  *  每个类别一个手柄焦点组（'stats:col:xxx'）——左右键跨列、上下键在列内移动 */
-function ColSection({ stats, section, colOrder, onOpenMenu }: {
+function ColSection({ stats, section, colOrder, onOpenMenu, ready, unavailableCovers }: {
   stats: Stats;
   section: (typeof SECTIONS)[number];
   colOrder: SectionKey[];  // 可见列顺序（隐藏的库不在内），手柄左右跨列按它跳转
   onOpenMenu: (e: React.MouseEvent, entry: TopEntry) => void; // 行右键（仅游戏列绑定）
+  ready: boolean;
+  unavailableCovers: ReadonlySet<string>;
 }) {
   const t = useT();
   const d = stats[section.key];
@@ -63,8 +69,19 @@ function ColSection({ stats, section, colOrder, onOpenMenu }: {
   // 行列表容器：每列独立滚动（页面本身不滚动）。右摇杆只滚当前焦点列 ——
   // 本列是焦点栈顶时注册为滚动目标，焦点跨列后自动撤销
   const rowsRef = useRef<HTMLDivElement>(null);
+  const rowKey = useCallback((i: number) => top[i].id, [top]);
+  const virtualizer = useVirtualizer({
+    count: top.length,
+    getScrollElement: () => rowsRef.current,
+    estimateSize: () => 88,
+    gap: 6,
+    overscan: 3,
+    getItemKey: rowKey,
+    // 隐藏常驻也预先建立首屏行，首次显示无需先等 ResizeObserver 回调。
+    initialRect: { width: 0, height: window.innerHeight },
+  });
   const isTopGroup = useFocusStore((s) => s.stack[s.stack.length - 1]?.group === group);
-  useRightStickScrollIf(rowsRef, isTopGroup);
+  useRightStickScrollIf(rowsRef, ready && isTopGroup);
 
   // 跳到相邻有内容的列（循环跳过空列），焦点落在该列上次的位置
   const jumpCol = (from: number, dir: 1 | -1) => {
@@ -83,15 +100,17 @@ function ColSection({ stats, section, colOrder, onOpenMenu }: {
 
   useGamepadGroup(group, {
     // 每列是纵向行列表（一行一个项目）：上下在列内移动，左右直接跨列
-    count: top.length,
+    count: ready ? top.length : 0,
     cols: 1,
     scrollIntoView: (i) => {
+      if (!ready) return;
       colIdx[section.key] = i;
-      document.querySelector(`[data-stat-cover="${section.key}-${i}"]`)
-        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      // 目标可能尚未挂载，先滚到对应虚拟行，再由虚拟列表挂载并显示焦点。
+      virtualizer.scrollToIndex(i, { align: 'auto' });
     },
     activate: () => {},
     horizontal: (dir) => {
+      if (!ready) return true;
       // 一行只有一项，左右没有列内移动可言：直接跳到相邻列
       jumpCol(colOrder.indexOf(section.key), dir === 'right' ? 1 : -1);
       return true;
@@ -101,6 +120,27 @@ function ColSection({ stats, section, colOrder, onOpenMenu }: {
       if (dir === 'up') useFocusStore.getState().switchTo('nav');
     },
   });
+
+  // 只挂载可见行及缓冲区，避免首次显示时整列 500 行参与样式计算与绘制。
+  const virtualRows = virtualizer.getVirtualItems();
+  const rows = useMemo(() => virtualRows.map((row) => {
+    const i = row.index;
+    const e = top[i];
+    return (
+      <div key={row.key} className="stats-virtual-row" style={{ top: row.start }}>
+        <RowCard
+          entry={e}
+          media={section.key}
+          color={section.color}
+          rank={i + 1}
+          focused={focusedIndex === i}
+          anchor={`${section.key}-${i}`}
+          coverUnavailable={unavailableCovers.has(statsCoverSrc(e))}
+          onContextMenu={section.key === 'game' ? onOpenMenu : undefined}
+        />
+      </div>
+    );
+  }), [virtualRows, top, section, focusedIndex, onOpenMenu, unavailableCovers]);
 
   return (
     <section className="stats-col" style={{ ['--cc' as string]: section.color }}>
@@ -113,19 +153,9 @@ function ColSection({ stats, section, colOrder, onOpenMenu }: {
 
       {top.length > 0 ? (
         <div className="stats-col-rows" ref={rowsRef}>
-          {top.map((e, i) => (
-            <RowCard
-              key={e.id}
-              entry={e}
-              media={section.key}
-              color={section.color}
-              rank={i + 1}
-              focused={focusedIndex === i}
-              anchor={`${section.key}-${i}`}
-              // 右键调整时长只给游戏列（影视/音乐行不绑，保持无右键行为）
-              onContextMenu={section.key === 'game' ? (ev) => onOpenMenu(ev, e) : undefined}
-            />
-          ))}
+          <div className="stats-virtual-space" style={{ height: virtualizer.getTotalSize() }}>
+            {rows}
+          </div>
         </div>
       ) : (
         <div className="stats-col-empty">{t('stats.noRecords')}</div>
@@ -134,22 +164,71 @@ function ColSection({ stats, section, colOrder, onOpenMenu }: {
   );
 }
 
-export default function StatsView() {
+/** 启动后台预渲染的静态布局；数据未就绪时由 App 保留此前页面。 */
+function StatsPlaceholder({ sections }: { sections: readonly (typeof SECTIONS)[number][] }) {
+  const t = useT();
+  return (
+    <div className="stats-page stats-placeholder" aria-busy="true" aria-label={t('stats.loading')}>
+      <div className="stats-cols" style={{ ['--cols' as string]: sections.length }}>
+        {sections.map((section) => {
+          const Icon = section.icon;
+          return (
+            <section key={section.key} className="stats-col" style={{ ['--cc' as string]: section.color }}>
+              <div className="stats-col-head">
+                <h2><Icon size={15} />{t(section.label)}</h2>
+                <span className="stats-placeholder-total" />
+              </div>
+              <div className="stats-placeholder-rows" aria-hidden="true">
+                {Array.from({ length: 8 }, (_, index) => (
+                  <div key={index} className="stats-row stats-placeholder-row">
+                    <div className={`stats-placeholder-cover ${section.key === 'music' ? 'stats-row-cover-square' : 'stats-row-cover-wide'}`} />
+                    <div className="stats-row-body"><span className="stats-placeholder-name" /></div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default function StatsView({ active }: { active: boolean }) {
   const t = useT();
   const stats = useAppStore((s) => s.stats);
   const loadStats = useAppStore((s) => s.loadStats);
+  const preparePresentation = useAppStore((s) => s.prepareStatsPresentation);
+  const unavailableCovers = useAppStore((s) => s.statsPresentation?.unavailableCovers ?? NO_UNAVAILABLE_COVERS);
   // 隐藏的库 → 统计页去掉对应列（数据一次拉全量，只影响展示）
   const hiddenLibraries = useAppStore((s) => s.hiddenLibraries);
+  const visibleSections = useMemo(() => SECTIONS.filter((s) => !hiddenLibraries.includes(SECTION_LIB[s.key])), [hiddenLibraries]);
+  const visibleOrder = useMemo(() => visibleSections.map((s) => s.key), [visibleSections]);
   const [error, setError] = useState<string | null>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
   // 游戏行右键菜单、「调整时长」弹窗、换悬停封面弹窗（均为纯鼠标功能，不注册手柄组）
   const [menu, setMenu] = useState<{ x: number; y: number; entry: TopEntry } | null>(null);
   const [adjusting, setAdjusting] = useState<TopEntry | null>(null);
   const [coverEntry, setCoverEntry] = useState<TopEntry | null>(null);
 
+  // 和三个库共用 App 启动预载的 store；切页不再刷新已缓存的数据。
+  // 后台在库数据/播放状态改变时更新统计，这里只处理启动尚未完成或失败的兜底。
   useEffect(() => {
-    setError(null);
-    loadStats().catch((e) => setError(typeof e === 'string' ? e : (e?.message ?? String(e))));
-  }, []);
+    if (useAppStore.getState().stats) return;
+    let alive = true;
+    void loadStats().then(
+      () => { if (alive) setError(null); },
+      (e) => { if (alive) setError(typeof e === 'string' ? e : (e?.message ?? String(e))); },
+    );
+    return () => { alive = false; };
+  }, [active, loadStats]);
+
+  useEffect(() => {
+    if (active) return;
+    setMenu(null);
+    setAdjusting(null);
+    setCoverEntry(null);
+  }, [active]);
 
   const refreshStats = async () => {
     setError(null);
@@ -175,18 +254,39 @@ export default function StatsView() {
   };
 
   // 游戏行右键：记菜单位置（事件需 stopPropagation，否则冒泡到页面容器被当成空白右键关掉）
-  const openRowMenu = (e: React.MouseEvent, entry: TopEntry) => {
+  const openRowMenu = useCallback((e: React.MouseEvent, entry: TopEntry) => {
     e.preventDefault();
     e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, entry });
-  };
+  }, []);
 
-  // 空态判断看库存量而非总时长：添加了游戏但还没玩过（总时长为 0）时，
-  // 游戏列仍要展示「未游玩」条目，不能整页显示「还没有任何记录」
-  const hasData = !!stats
-    && (stats.game.library_count + stats.video.library_count + stats.music.library_count) > 0;
+  // 实体已删除时，历史统计仍由 stats_archive 续存；未游玩的实体也属于有效数据。
+  const hasData = !!stats && [stats.game, stats.video, stats.music].some((media) =>
+    media.library_count > 0 || media.top.length > 0 || media.total_seconds > 0 || media.play_count > 0);
 
-  if (error) {
+  // 隐藏期间也有真实布局，启动即可解码首屏；仅数据/可见库变化时更新预热。
+  // active 不参与依赖，缓存切页不重新读图、不卸载行；首次就绪再交接显示。
+  useLayoutEffect(() => {
+    if ((!stats && error) || (stats && !hasData)) {
+      preparePresentation(stats, hiddenLibraries);
+      return;
+    }
+    if (!stats || !pageRef.current) return;
+    let firstFrame = 0;
+    let secondFrame = 0;
+    const dispose = preloadStatsImages(pageRef.current, ({ unavailableSources }) => {
+      firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(() => preparePresentation(stats, hiddenLibraries, unavailableSources));
+      });
+    });
+    return () => {
+      dispose();
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [stats, hasData, hiddenLibraries, error, preparePresentation]);
+
+  if (error && !stats) {
     return (
       <div className="h-full flex items-center justify-center px-8">
         <div className="text-center">
@@ -199,17 +299,13 @@ export default function StatsView() {
   }
 
   if (!stats) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="stats-skeleton-pulse text-text-tertiary text-sm">{t('stats.loading')}</div>
-      </div>
-    );
+    return <StatsPlaceholder sections={visibleSections} />;
   }
 
   if (!hasData) {
     return (
       <div className="h-full flex items-center justify-center px-8">
-        <div className="text-center animate-fade-up">
+        <div className={`text-center${active ? ' stats-empty-enter' : ''}`}>
           <div className="empty-orb mx-auto mb-6"><BarChart3 size={38} /></div>
           <h2 className="text-xl font-bold mb-2">{t('stats.emptyTitle')}</h2>
           <p className="text-sm text-text-secondary max-w-sm mx-auto leading-relaxed">
@@ -220,13 +316,14 @@ export default function StatsView() {
     );
   }
 
-  // 可见列与跨列顺序：按 hiddenLibraries 过滤，隐藏的库不进统计页
-  const visibleSections = SECTIONS.filter((s) => !hiddenLibraries.includes(SECTION_LIB[s.key]));
-  const visibleOrder = visibleSections.map((s) => s.key);
-
   return (
-    <div className="h-full">
-      <div className="stats-page">
+    <div className="relative h-full">
+      {/* 数据、行和封面常驻；进入时同一帧启用动画，切走移除，下一次进入重新播放。 */}
+      <div
+        ref={pageRef}
+        className="stats-page"
+        data-stats-enter={active ? '' : undefined}
+      >
         {/* 列数走 CSS 变量而非内联 gridTemplateColumns：内联会压过窄窗口（≤1200px）的单列媒体查询 */}
         <div
           className="stats-cols"
@@ -235,13 +332,13 @@ export default function StatsView() {
           onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
         >
           {visibleSections.map((s) => (
-            <ColSection key={s.key} stats={stats} section={s} colOrder={visibleOrder} onOpenMenu={openRowMenu} />
+            <ColSection key={s.key} stats={stats} section={s} colOrder={visibleOrder} onOpenMenu={openRowMenu} ready={active} unavailableCovers={unavailableCovers} />
           ))}
         </div>
       </div>
 
       {/* 游戏行右键菜单（纯鼠标：外部点击 / Esc / 空白右键关闭） */}
-      {menu && (
+      {active && menu && (
         <StatsRowMenu
           x={menu.x}
           y={menu.y}
@@ -256,7 +353,7 @@ export default function StatsView() {
       )}
 
       {/* 更换悬停封面弹窗：行上的封面就是横屏图，所以只取横屏候选（等效游戏库的「更换悬停封面」） */}
-      {coverEntry && (
+      {active && coverEntry && (
         <CoverPickerModal
           game={coverEntry}
           kind="wide"
@@ -269,7 +366,7 @@ export default function StatsView() {
       )}
 
       {/* 调整时长弹窗 */}
-      {adjusting && (
+      {active && adjusting && (
         <StatsAdjustModal
           entry={adjusting}
           onClose={() => setAdjusting(null)}

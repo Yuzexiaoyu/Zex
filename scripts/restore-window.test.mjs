@@ -30,16 +30,16 @@ function fixture(t) {
 
 test('window shows after two paint opportunities and finishes only finite entrance motion', async (t) => {
   const f = fixture(t);
-  for (const [name, iterations] of [['stats-enter', 1], ['card-enter', 1], ['fade-in', 1], ['spin', Infinity], ['card-enter', Infinity], ['unrelated', 1]]) {
+  for (const [name, iterations] of [['stats-enter', 1], ['stats-column-enter', 1], ['stats-accent-enter', 1], ['stats-row-enter', 1], ['card-enter', 1], ['fade-in', 1], ['spin', Infinity], ['card-enter', Infinity], ['stats-column-enter', Infinity], ['stats-accent-enter', Infinity], ['stats-row-enter', Infinity], ['unrelated', 1]]) {
     f.animations.push({ animationName: name, effect: { getComputedTiming: () => ({ iterations }) }, finish: () => f.events.push(name) });
   }
   const restored = restoreWindowAfterPaint(f.restore, f.show, () => true);
   assert.deepEqual(f.events, ['restore']);
   f.frame();
-  assert.deepEqual(f.events, ['restore', 'stats-enter', 'card-enter', 'fade-in'], 'finish motion before the paint that precedes native show');
+  assert.deepEqual(f.events, ['restore', 'stats-enter', 'stats-column-enter', 'stats-accent-enter', 'stats-row-enter', 'card-enter', 'fade-in'], 'finish page, column, accent and row motion before the paint that precedes native show');
   f.frame();
   await restored;
-  assert.deepEqual(f.events, ['restore', 'stats-enter', 'card-enter', 'fade-in', 'show']);
+  assert.deepEqual(f.events, ['restore', 'stats-enter', 'stats-column-enter', 'stats-accent-enter', 'stats-row-enter', 'card-enter', 'fade-in', 'show']);
 });
 
 test('duplicate restore events coalesce to the latest show request', async (t) => {

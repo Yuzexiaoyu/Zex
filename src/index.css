@@ -2603,14 +2603,59 @@ html:not(.dark) .detail-back { background: rgba(255, 255, 255, 0.7); }
   /* 行高固定 88px；屏外内容由虚拟列表卸载，不再等 visibility 改变时批量绘制。 */
 }
 
-/* 首帧始终不透明。只做位移入场，旧库卸载后不会先露出整片深色底图。 */
+/* 整页、列、条目沿同一方向分层进入。列先抬升，条目以更小幅度短错峰跟随，
+   首帧保持不透明；仅切入时标记的可视行参与，不给滚动新挂载的行补播。 */
 @keyframes stats-enter {
-  from { transform: translateY(8px); }
-  to { transform: translateY(0); }
+  from { transform: translate3d(0, 4px, 0); }
+  to { transform: none; }
 }
 .stats-page[data-stats-enter],
 .stats-empty-enter {
-  animation: stats-enter 0.3s cubic-bezier(0.2, 0, 0, 1) both;
+  animation: stats-enter 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes stats-column-enter {
+  0% { transform: translate3d(0, 24px, 0) scale(0.98); }
+  72% { transform: translate3d(0, -1.5px, 0) scale(1.001); }
+  100% { transform: none; }
+}
+@keyframes stats-row-enter {
+  from { transform: translate3d(0, 12px, 0); }
+  to { transform: none; }
+}
+@keyframes stats-accent-enter {
+  0% { opacity: 0; transform: scaleX(0.18); }
+  28% { opacity: 0.75; }
+  58% { opacity: 0.4; }
+  100% { opacity: 0; transform: scaleX(1); }
+}
+.stats-col {
+  position: relative;
+  --stats-entry-delay: 0ms;
+}
+.stats-col:nth-child(2) { --stats-entry-delay: 45ms; }
+.stats-col:nth-child(3) { --stats-entry-delay: 90ms; }
+.stats-page[data-stats-enter] .stats-col {
+  transform-origin: center top;
+  animation: stats-column-enter 500ms cubic-bezier(0.22, 1, 0.36, 1) var(--stats-entry-delay) both;
+}
+.stats-page[data-stats-enter] .stats-virtual-row[data-stats-row-enter] {
+  animation: stats-row-enter 380ms cubic-bezier(0.16, 1, 0.3, 1) calc(var(--stats-entry-delay) + var(--stats-row-delay)) both;
+}
+/* 顶沿短暂提亮，作为落位提示；不遮挡封面，也不参与鼠标命中。 */
+.stats-page[data-stats-enter] .stats-col::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 16px;
+  right: 16px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--cc) 35%, white), transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--cc) 45%, transparent);
+  pointer-events: none;
+  transform-origin: left center;
+  animation: stats-accent-enter 580ms cubic-bezier(0.16, 1, 0.3, 1) var(--stats-entry-delay) both;
 }
 .stats-row-cover-wide.stats-row-cover-unavailable { width: 128px; }
 

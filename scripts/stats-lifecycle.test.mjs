@@ -25,6 +25,10 @@ server.middlewares.use('/__stats-lifecycle', async (_req, res) => {
       window.restore = () => restoreWindowAfterPaint(() => {}, async () => {}, () => true);
       window.animationStarts = [];
       window.animationEnds = [];
+      window.rowAnimationStarts = [];
+      document.addEventListener('animationstart', (e) => {
+        if (e.animationName === 'stats-row-enter') window.rowAnimationStarts.push(e.target.querySelector('.stats-row')?.dataset.statCover);
+      });
       for (const [event, target] of [['animationstart', window.animationStarts], ['animationend', window.animationEnds]]) {
         document.addEventListener(event, (e) => {
           if (e.animationName === 'stats-enter' && e.target.classList.contains('stats-page')) target.push(e.target.className);
@@ -58,6 +62,7 @@ try {
   await page.addInitScript(() => {
     window.statsCalls = 0;
     window.revision = 0;
+    window.entryRevision = 0;
     window.decodes = 0;
     const decode = HTMLImageElement.prototype.decode;
     HTMLImageElement.prototype.decode = function () { window.decodes++; return decode.call(this); };
@@ -66,7 +71,8 @@ try {
       total_seconds: 10000, play_count: 10, library_count: 500, played_count: 500,
       total_episodes: 0, total_watched_episodes: 0,
       top: Array.from({ length: 500 }, (_, i) => ({
-        id: key + '-' + i, name: key + ' ' + i, sub: '', seconds: 10000 - i, count: 1,
+        id: key + (i === 0 && window.entryRevision ? '-replacement-' : '-') + i,
+        name: key + ' ' + i + (i === 0 && window.entryRevision ? ' refreshed' : ''), sub: '', seconds: 10000 - i, count: 1,
         cover_path: '/__stats-cover/' + key + '/' + i + '?revision=' + (i === 0 ? window.revision : 0), wide_path: '',
       })),
     });
@@ -98,6 +104,7 @@ try {
   });
   await page.waitForFunction(() => { const s = window.store.getState(); return s.statsPresentation?.stats === s.stats && s.statsPresentation?.libraries === s.hiddenLibraries; });
   assert.equal(await page.locator('[data-stats-enter]').count(), 0, 'hidden startup must not play the entry animation');
+  assert.equal(await page.locator('[data-stats-row-enter]').count(), 0, 'hidden startup must not mark any row for entrance motion');
   assert.equal(await page.evaluate(() => window.animationStarts.length), 0);
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const { root } = await compositor.send('DOM.getDocument');
@@ -162,20 +169,56 @@ try {
   const callsBeforeEntry = await page.evaluate(() => window.statsCalls);
   const requestsBeforeEntry = imageRequests;
   const decodesBeforeEntry = await page.evaluate(() => window.decodes);
+  const waitForStatsMotion = () => page.locator('.stats-surface').evaluate(async (el) => {
+    const finiteAnimations = el.getAnimations({ subtree: true }).filter((animation) =>
+      animation.effect?.getComputedTiming().iterations !== Infinity);
+    await Promise.all(finiteAnimations.map((animation) => animation.finished));
+  });
+  await page.evaluate(() => {
+    window.rowEntrySnapshot = () => [...document.querySelectorAll('.stats-col')].map((column) => {
+      const list = column.querySelector('.stats-col-rows');
+      return {
+        scrollTop: list.scrollTop,
+        rows: [...list.querySelectorAll('.stats-virtual-row')].map((row) => ({
+          anchor: row.querySelector('.stats-row').dataset.statCover,
+          visible: row.offsetTop + row.offsetHeight > list.scrollTop && row.offsetTop < list.scrollTop + list.clientHeight,
+          tagged: row.hasAttribute('data-stats-row-enter'),
+          animationName: getComputedStyle(row).animationName,
+          delay: row.getAnimations().find((animation) => animation.animationName === 'stats-row-enter')?.effect?.getTiming().delay ?? null,
+        })),
+      };
+    });
+  });
+  const inspectRowEntries = () => page.evaluate(() => window.rowEntrySnapshot());
+  const assertVisibleRowEntries = (columns, context) => {
+    for (const [index, column] of columns.entries()) {
+      const visible = column.rows.filter((row) => row.visible);
+      assert.ok(visible.length > 1, context + ': column ' + index + ' must contain visible rows');
+      assert.ok(visible.every((row) => row.tagged && row.animationName === 'stats-row-enter'), context + ': every visible row must receive entrance motion');
+      assert.ok(column.rows.filter((row) => !row.visible).every((row) => !row.tagged), context + ': overscan rows must remain unmarked');
+      assert.ok(visible.every((row) => Number.isFinite(row.delay) && row.delay >= 0 && row.delay < 500), context + ': row delays must stay short regardless of global rank');
+      assert.ok(visible.every((row, i) => i === 0 || row.delay >= visible[i - 1].delay), context + ': rows must enter in reading order');
+    }
+  };
   const enter = async () => {
     await page.evaluate(() => window.store.getState().setActiveView('stats'));
     await page.waitForSelector('[data-stats-enter]');
     assert.equal(await page.locator('.stats-placeholder').count(), 0);
     assert.equal(await page.locator('.stats-page').evaluate((el) => getComputedStyle(el).animationName), 'stats-enter');
-    await page.waitForTimeout(380);
+    const columns = await inspectRowEntries();
+    assertVisibleRowEntries(columns, 'navigation');
+    await waitForStatsMotion();
+    return columns;
   };
   const leave = async () => {
     await page.evaluate(() => window.store.getState().setActiveView('games'));
     await page.waitForSelector('[data-stats-enter]', { state: 'detached' });
+    assert.equal(await page.locator('[data-stats-row-enter]').count(), 0, 'leaving must clear the previous entrance row selection');
   };
   // 逐帧检查外框、文字、封面有效透明度，不能再出现外框已亮、列表仍透明的中间帧。
-  const entryFrames = await page.evaluate(() => new Promise((resolve) => {
+  const { frames: entryFrames, columns: firstEntryColumns } = await page.evaluate(() => new Promise((resolve) => {
     const frames = [];
+    let columns;
     const opacity = (element) => {
       if (!element) return 0;
       let result = 1;
@@ -185,14 +228,30 @@ try {
     const start = performance.now();
     window.store.getState().setActiveView('stats');
     const sample = () => {
-      frames.push({ ms: performance.now() - start, old: opacity(document.querySelector('[data-previous-view]')), panel: opacity(document.querySelector('.stats-col')), list: opacity(document.querySelector('.stats-col-rows')), cover: opacity(document.querySelector('.stats-row img')), transform: getComputedStyle(document.querySelector('.stats-page')).transform });
-      if (performance.now() - start < 360) requestAnimationFrame(sample); else resolve(frames);
+      if (!columns && document.querySelector('[data-stats-enter]')) columns = window.rowEntrySnapshot();
+      const panels = [...document.querySelectorAll('.stats-col')].map((column) => ({
+        panel: opacity(column),
+        list: opacity(column.querySelector('.stats-col-rows')),
+        rows: [...column.querySelectorAll('.stats-virtual-row')].filter((row) => row.hasAttribute('data-stats-row-enter')).map((row) => ({
+          row: opacity(row.querySelector('.stats-row')),
+          name: opacity(row.querySelector('.stats-row-name')),
+          cover: opacity(row.querySelector('img')),
+          transform: getComputedStyle(row).transform,
+        })),
+      }));
+      frames.push({ ms: performance.now() - start, old: opacity(document.querySelector('[data-previous-view]')), panels, transform: getComputedStyle(document.querySelector('.stats-page')).transform });
+      const pending = document.querySelector('.stats-surface').getAnimations({ subtree: true }).some((animation) =>
+        animation.effect?.getComputedTiming().iterations !== Infinity && animation.playState !== 'finished');
+      if (!document.querySelector('[data-stats-enter]') || pending) requestAnimationFrame(sample); else resolve({ frames, columns });
     };
     requestAnimationFrame(sample);
   }));
-  assert.ok(entryFrames.every((frame) => Math.abs(frame.panel - frame.list) < 0.001 && Math.abs(frame.panel - frame.cover) < 0.001), 'the panel, list and covers must enter together in every sampled frame');
-  assert.ok(entryFrames.every((frame) => Math.max(frame.old, frame.panel) >= 0.999), 'equal transparent panel/list/cover values must never pass the no-blank-frame check');
-  assert.ok(entryFrames.some((frame) => frame.panel >= 0.999 && frame.transform !== 'none' && frame.transform !== 'matrix(1, 0, 0, 1, 0, 0)'), 'entry must animate its position while remaining opaque');
+  assertVisibleRowEntries(firstEntryColumns, 'first entrance');
+  assert.ok(entryFrames.every((frame) => frame.panels.every((panel) => Math.abs(panel.panel - panel.list) < 0.001 && panel.rows.every((row) => [row.row, row.name, row.cover].every((value) => Math.abs(panel.panel - value) < 0.001)))), 'all three panels, row text and covers must retain synchronized effective opacity throughout entry');
+  assert.ok(entryFrames.every((frame) => Math.max(frame.old, ...frame.panels.map((panel) => panel.panel)) >= 0.999), 'equal transparent panel/list/cover values must never pass the no-blank-frame check');
+  const moves = (transform) => transform !== 'none' && transform !== 'matrix(1, 0, 0, 1, 0, 0)';
+  assert.ok(entryFrames.some((frame) => frame.panels.every((panel) => panel.panel >= 0.999) && moves(frame.transform)), 'entry must animate its position while remaining opaque');
+  assert.ok(entryFrames.some((frame) => frame.panels.every((panel) => panel.rows.some((row) => moves(row.transform)))), 'visible rows in all three columns must move during the entrance');
   await leave();
 
   await page.evaluate(() => { window.animationStarts.length = 0; window.animationEnds.length = 0; });
@@ -217,9 +276,16 @@ try {
   const refreshedCalls = await page.evaluate(() => window.statsCalls);
   await enter();
   const startsBeforeRefresh = await page.evaluate(() => window.animationStarts.length);
-  await page.evaluate(async () => { await window.store.getState().loadStats(); });
-  await page.waitForTimeout(100);
+  const rowStartsBeforeRefresh = await page.evaluate(() => window.rowAnimationStarts.length);
+  await page.evaluate(async () => {
+    window.entryRevision = 1;
+    await window.store.getState().loadStats();
+  });
+  await page.waitForFunction(() => [...document.querySelectorAll('.stats-col')].every((column) => column.querySelector('.stats-row-name').textContent.endsWith(' refreshed')));
+  await waitForStatsMotion();
   assert.equal(await page.evaluate(() => window.animationStarts.length), startsBeforeRefresh, 'data refresh must not replay the entry animation');
+  assert.equal(await page.evaluate(() => window.rowAnimationStarts.length), rowStartsBeforeRefresh, 'data refresh must not replay existing or newly mounted row motion');
+  assert.ok((await inspectRowEntries()).every((column) => !column.rows[0].tagged && column.rows[0].animationName === 'none'), 'new entries mounted by a refresh must remain immediately visible without entrance motion');
 
   await page.evaluate(() => window.store.setState({ nowPlaying: { trackId: 'music-0', playing: true, positionMs: 0 } }));
   await page.waitForFunction((calls) => window.statsCalls === calls + 1, refreshedCalls + 1);
@@ -232,9 +298,23 @@ try {
   await page.waitForTimeout(500);
   assert.equal(await page.evaluate(() => window.statsCalls), playingCalls, 'per-second playback progress must not query statistics');
 
-  await page.locator('.stats-col-rows').first().evaluate((el) => { el.scrollTop = 500; });
-  await leave(); await enter();
-  assert.ok(await page.locator('.stats-col-rows').first().evaluate((el) => el.scrollTop >= 499), 'resident columns must retain scroll position');
+  const rowStartsBeforeScroll = await page.evaluate(() => window.rowAnimationStarts.length);
+  await page.locator('.stats-col-rows').first().evaluate((el) => { el.scrollTop = 32000; });
+  await page.waitForFunction(() => {
+    const row = document.querySelector('.stats-col .stats-row');
+    return Number(row?.dataset.statCover.split('-').at(-1)) > 300;
+  });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const farRows = (await inspectRowEntries())[0];
+  assert.ok(farRows.rows.every((row) => !row.tagged && row.animationName === 'none'), 'new rows mounted by scrolling must not replay entrance motion');
+  assert.equal(await page.evaluate(() => window.rowAnimationStarts.length), rowStartsBeforeScroll, 'scrolling must not start any row entrance animations');
+  assert.ok(await page.locator('.stats-row').count() < 80, 'scrolling far into 1500 records must retain virtualization');
+  await leave();
+  const reenteredColumns = await enter();
+  assert.ok(reenteredColumns[0].scrollTop >= 31999, 'resident columns must retain scroll position');
+  const initialFirstDelay = firstEntryColumns[0].rows.find((row) => row.visible).delay;
+  const reenteredFirstDelay = reenteredColumns[0].rows.find((row) => row.visible).delay;
+  assert.ok(Math.abs(reenteredFirstDelay - initialFirstDelay) < 100, 'reentry must stagger the current viewport from its first visible row rather than delaying by global rank');
   await page.evaluate(() => {
     window.setInputMode('gamepad');
     window.focusStore.getState().reset('stats:col:game', 499);
@@ -262,13 +342,47 @@ try {
   await leave();
   await page.evaluate(() => window.store.getState().setActiveView('stats'));
   await page.waitForSelector('[data-stats-enter]');
-  await page.evaluate(async () => { await window.restore(); });
-  assert.equal(await page.locator('.stats-page').evaluate((el) => el.getAnimations()[0].playState), 'finished', 'tray restore must finish existing entrance motion before showing the window');
+  const restoredAnimations = await page.evaluate(async () => {
+    const surface = document.querySelector('.stats-surface');
+    // subtree:true includes the accent pseudo-elements as well as the page, columns and visible rows.
+    const animations = surface.getAnimations({ subtree: true }).filter((animation) =>
+      ['stats-enter', 'stats-column-enter', 'stats-accent-enter', 'stats-row-enter'].includes(animation.animationName));
+    await window.restore();
+    return {
+      columns: surface.querySelectorAll('.stats-col').length,
+      rows: surface.querySelectorAll('[data-stats-row-enter]').length,
+      animations: animations.map((animation) => ({ name: animation.animationName, state: animation.playState })),
+    };
+  });
+  assert.equal(restoredAnimations.animations.filter((animation) => animation.name === 'stats-enter').length, 1);
+  for (const name of ['stats-column-enter', 'stats-accent-enter']) {
+    assert.equal(restoredAnimations.animations.filter((animation) => animation.name === name).length, restoredAnimations.columns, 'each visible column must create its ' + name + ' animation');
+  }
+  assert.ok(restoredAnimations.rows > 0, 'tray restore must retain visible-row entrance animations to finish');
+  assert.equal(restoredAnimations.animations.filter((animation) => animation.name === 'stats-row-enter').length, restoredAnimations.rows, 'every selected visible row must create its entrance animation');
+  assert.ok(restoredAnimations.animations.every((animation) => animation.state === 'finished'), 'tray restore must finish page, column, pseudo-element and visible-row entrance motion before showing the window');
   assert.equal(await page.locator('[data-skip-animations]').count(), 0);
   await leave(); await enter();
   assert.equal(await page.locator('.stats-page').evaluate((el) => getComputedStyle(el).animationName), 'stats-enter', 'restore cannot suppress later navigation');
+
+  // 已开始的条目入场可被切页中断；旧选择与动画清空，下次重新选择当前可视行。
+  await leave();
+  await page.evaluate(() => window.store.getState().setActiveView('stats'));
+  const interruptedRowCount = await (await page.waitForFunction(() => {
+    const animations = document.querySelector('.stats-surface').getAnimations({ subtree: true }).filter((animation) =>
+      animation.animationName === 'stats-row-enter' && animation.playState === 'running' &&
+      Number(animation.currentTime) > animation.effect.getTiming().delay);
+    if (!animations.length) return false;
+    window.interruptedRowAnimations = animations;
+    return animations.length;
+  })).jsonValue();
+  await leave();
+  assert.equal(await page.locator('.stats-surface').evaluate((surface) => surface.getAnimations({ subtree: true }).filter((animation) => animation.animationName === 'stats-row-enter').length), 0, 'interrupting entry must remove all old row entrance animations');
+  assert.ok(await page.evaluate(() => window.interruptedRowAnimations.every((animation) => animation.playState === 'idle')), 'previous row animation objects must be cancelled after leaving');
+  await enter();
+
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ records: 1500, virtualized: true, hiddenStartupPredecoded: true, backgroundPainted, repeatedEntries: 3, completedEntryAnimations: 3, synchronizedFirstEntryFrames: entryFrames.length, gamepadLastRow: 499, modalViewportPreserved: true, navigationQueries: 0, navigationImageRequests: 0, navigationDecodes: 0, residentDomAndScroll: true, backgroundRefreshCoalesced: refreshedCalls === callsBeforeEntry + 1, refreshDoesNotReplay: true, playbackProgressQueries: 0, hiddenLibraryColumns: 2, trayRestoreFinishesAnimation: true, nextNavigationReplays: true, pageErrors: errors }));
+  console.log(JSON.stringify({ records: 1500, virtualized: true, hiddenStartupPredecoded: true, backgroundPainted, repeatedEntries: 3, completedEntryAnimations: 3, synchronizedFirstEntryFrames: entryFrames.length, visibleRowsAnimateInAllColumns: true, overscanRowsDoNotAnimate: true, scrollingDoesNotReplay: true, reentryUsesViewportOrder: true, initialFirstDelay, reenteredFirstDelay, gamepadLastRow: 499, modalViewportPreserved: true, navigationQueries: 0, navigationImageRequests: 0, navigationDecodes: 0, residentDomAndScroll: true, backgroundRefreshCoalesced: refreshedCalls === callsBeforeEntry + 1, refreshDoesNotReplay: true, refreshedNewEntriesDoNotAnimate: true, playbackProgressQueries: 0, hiddenLibraryColumns: 2, trayRestoreFinishesAnimation: true, trayRestoreFinishesColumnsAndAccents: true, trayRestoreFinishedRows: restoredAnimations.rows, nextNavigationReplays: true, interruptedRowCount, interruptedEntriesClearAndReplay: true, pageErrors: errors }));
 } finally {
   await browser?.close();
   await server.close();

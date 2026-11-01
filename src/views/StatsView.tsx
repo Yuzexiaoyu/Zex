@@ -142,6 +142,31 @@ function ColSection({ stats, section, colOrder, onOpenMenu, ready, unavailableCo
     );
   }), [virtualRows, top, section, focusedIndex, onOpenMenu, unavailableCovers]);
 
+  // 每次切入只编排当前可视的行；滚动/刷新后新挂载的行直接显示，不重复入场。
+  // 先批量读取几何信息，再写入标记，避免逐行读写引起反复布局。
+  useLayoutEffect(() => {
+    const container = rowsRef.current;
+    if (!ready || !container) return;
+    const bounds = container.getBoundingClientRect();
+    const visibleTop = Math.max(bounds.top, 0);
+    const visibleBottom = Math.min(bounds.bottom, window.innerHeight);
+    if (visibleBottom <= visibleTop) return;
+    const enteringRows = Array.from(container.querySelectorAll<HTMLElement>('.stats-virtual-row')).filter((row) => {
+      const rect = row.getBoundingClientRect();
+      return rect.bottom > visibleTop && rect.top < visibleBottom;
+    });
+    enteringRows.forEach((row, index) => {
+      row.style.setProperty('--stats-row-delay', `${85 + Math.min(index, 7) * 22}ms`);
+      row.setAttribute('data-stats-row-enter', '');
+    });
+    return () => {
+      enteringRows.forEach((row) => {
+        row.removeAttribute('data-stats-row-enter');
+        row.style.removeProperty('--stats-row-delay');
+      });
+    };
+  }, [ready]);
+
   return (
     <section className="stats-col" style={{ ['--cc' as string]: section.color }}>
       {/* 标题行下面原本有一行小字（次数 / 已玩 X/Y / 已看集数），已按要求删掉；

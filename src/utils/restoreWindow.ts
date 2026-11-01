@@ -1,6 +1,7 @@
 let restoreSequence = 0;
 const ENTRANCE_ANIMATIONS = new Set([
-  'card-enter', 'stats-enter', 'fade-up', 'fade-in', 'scale-in', 'hero-in',
+  'card-enter', 'stats-enter', 'stats-column-enter', 'stats-row-enter', 'stats-accent-enter',
+  'fade-up', 'fade-in', 'scale-in', 'hero-in',
   'music-row-reveal', 'preview-enter',
 ]);
 

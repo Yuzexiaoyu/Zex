@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import * as api from '../api';
 import type { ProfileConfig, ProfileTargetInfo } from '../api';
 import { X, Minus, Plus, Power, Download, Loader2, AlertTriangle, Gauge, Globe, Gamepad2 } from 'lucide-react';
@@ -176,8 +176,11 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
   // 弹窗期间手柄按键不穿透到背后视图（B/Esc 关闭，表单内容用鼠标操作）
   useModalGamepad('modal:fps-settings', { onClose });
 
-  const [rtss, setRtss] = useState<{ installed: boolean; running: boolean }>({ installed: false, running: false });
-  const [launchingRtss, setLaunchingRtss] = useState(false);
+  const [rtss, setRtss] = useState<api.RtssStatus>({ installed: false, running: false, cleanup_pending: false, path: null });
+  const [changingRtss, setChangingRtss] = useState(false);
+  const rtssMounted = useRef(false);
+  const rtssRequest = useRef(0);
+  const changingRtssRef = useRef(false);
 
   const [targets, setTargets] = useState<ProfileTargetInfo[]>([]);
   const [targetId, setTargetId] = useState(initialTarget ?? api.RTSS_GLOBAL);
@@ -207,13 +210,25 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
 
   // RTSS 是开关落盘后按需拉起/销毁的（后台要一两秒），状态行靠补刷跟上
   const refreshRtss = useCallback(() => {
-    api.rtssStatus().then((s) => setRtss({ installed: s.installed, running: s.running })).catch(() => {});
+    if (!rtssMounted.current || changingRtssRef.current) return;
+    const request = ++rtssRequest.current;
+    api.rtssStatus().then((s) => {
+      if (rtssMounted.current && request === rtssRequest.current && !changingRtssRef.current) setRtss(s);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
+    rtssMounted.current = true;
     refreshRtss();
     api.rtssDefaultProfile().then(setDefaults).catch(() => {});
     void reloadTargets();
+    // 初始化/UAC 可能超过一次补刷的延迟；持续刷新也能跟上外部启动、退出。
+    const timer = window.setInterval(refreshRtss, 2500);
+    return () => {
+      rtssMounted.current = false;
+      ++rtssRequest.current;
+      window.clearInterval(timer);
+    };
   }, [reloadTargets, refreshRtss]);
 
   // 切换配置对象就整份重读（profile 文件是唯一真相，没有本地缓存要同步）。
@@ -238,10 +253,9 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
       .then(() => {
         // 每次落盘都刷新 targets 列表：任何改动都可能翻转该游戏「与全局相同」的判定，
         // 「单独设置」角标和「恢复跟随全局」按钮的显隐都依赖列表里的 same_as_global。
-        // RTSS 生死跟着这次落盘变（后台拉起要一两秒），状态行补刷两次
+        // 后续初始化状态由面板的定时刷新跟进
         void reloadTargets();
         refreshRtss();
-        window.setTimeout(refreshRtss, 2500);
       })
       .catch(fail);
   };
@@ -254,7 +268,6 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
       // RTSS 会被收掉，状态行也要跟着变
       setCfg(await api.rtssReadProfile(targetId));
       refreshRtss();
-      window.setTimeout(refreshRtss, 2500);
     } catch (e) {
       fail(e);
     }
@@ -265,21 +278,45 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
     if (defaults) patch(defaults);
   };
 
-  const launchRtss = async () => {
-    setLaunchingRtss(true);
+  const toggleRtss = async () => {
+    if (changingRtssRef.current || !rtssMounted.current) return;
+    const stopping = rtss.running || rtss.cleanup_pending;
+    changingRtssRef.current = true;
+    // 使操作前发出的状态查询失效；操作期间的定时刷新也不能覆盖结果。
+    const request = ++rtssRequest.current;
+    const current = () => rtssMounted.current && request === rtssRequest.current;
+    setChangingRtss(true);
     try {
-      const s = await api.rtssLaunch();
-      setRtss({ installed: s.installed, running: s.running });
-      if (s.installed && !s.running) {
-        void message(t('settings.rtssStartFailed', { msg: '' }), { title: t('common.error'), kind: 'error' });
+      const s = stopping ? await api.rtssStop() : await api.rtssLaunch();
+      if (!current()) return;
+      setRtss(s);
+      if (stopping ? s.running || s.cleanup_pending : s.installed && !s.running) {
+        // 启动后仍没运行，或关闭后仍在运行，都按本次动作给出错误
+        const detail = stopping ? t('settings.rtssStillRunning') : t('settings.rtssStillStopped');
+        void message(t(stopping ? 'settings.rtssStopFailed' : 'settings.rtssStartFailed', { msg: detail }), {
+          title: t('common.error'),
+          kind: 'error',
+        });
       }
-    } catch (e: any) {
-      void message(t('settings.rtssStartFailed', { msg: typeof e === 'string' ? e : (e?.message ?? String(e)) }), {
+    } catch (e: unknown) {
+      if (!current()) return;
+      // 主进程可能已退出、但清理失败。刷新后保留「完成关闭」重试入口。
+      try {
+        const s = await api.rtssStatus();
+        if (current()) setRtss(s);
+      } catch { /* 保留已有状态，允许重试本次操作 */ }
+      if (!current()) return;
+      void message(t(stopping ? 'settings.rtssStopFailed' : 'settings.rtssStartFailed', {
+        msg: typeof e === 'string' ? e : (e instanceof Error ? e.message : String(e)),
+      }), {
         title: t('common.error'),
         kind: 'error',
       });
     } finally {
-      setLaunchingRtss(false);
+      if (current()) {
+        changingRtssRef.current = false;
+        setChangingRtss(false);
+      }
     }
   };
 
@@ -370,11 +407,11 @@ export default function FpsSettingsModal({ onClose, initialTarget }: Props) {
               {rtss.installed ? (
                 <button
                   className="btn btn-glass gap-2 text-sm w-full"
-                  onClick={() => void launchRtss()}
-                  disabled={launchingRtss}
+                  onClick={() => void toggleRtss()}
+                  disabled={changingRtss}
                 >
-                  {launchingRtss ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
-                  {rtss.running ? t('settings.rtssRunning') : t('settings.rtssLaunchBtn')}
+                  {changingRtss ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
+                  {t(rtss.running ? 'settings.rtssStopBtn' : rtss.cleanup_pending ? 'settings.rtssCleanupBtn' : 'settings.rtssLaunchBtn')}
                 </button>
               ) : (
                 <>

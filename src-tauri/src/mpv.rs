@@ -32,8 +32,8 @@ use crate::{AppError, AppResult, AppState};
 const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 // 相邻两次 time-pos 事件间隔超过这个值，就认为中间暂停/卡顿过，不计入观看时长
 const TICK_GAP_MAX: f64 = 2.0;
-// 看到这个比例之后退出，就算作看完（片尾曲通常不会看到最后一秒）
-const WATCHED_THRESHOLD: f64 = 0.92;
+// 最远播放位置达到这个比例即标记已看，之后回退进度不撤销（片尾通常不会看到最后一秒）。
+const WATCHED_THRESHOLD: f64 = 0.90;
 // mpv 输入节默认鼠标区域覆盖整屏；手柄节不应阻止光标隐藏和窗口拖动。
 const GAMEPAD_SECTION_FLAGS: &str = "allow-hide-cursor+allow-vo-dragging";
 
@@ -1171,7 +1171,9 @@ fn close_music_session(_conn: &Connection, _session_id: &str) {}
 /// 不依赖退出时的结算
 struct Tally {
     position: f64,
+    furthest_position: f64,
     duration: f64,
+    completion_recorded: bool,
     accumulated: f64,
     written: f64,
     last_tick: Option<Instant>,
@@ -1182,7 +1184,9 @@ impl Tally {
     fn new() -> Self {
         Self {
             position: 0.0,
+            furthest_position: 0.0,
             duration: 0.0,
+            completion_recorded: false,
             accumulated: 0.0,
             written: 0.0,
             last_tick: None,
@@ -1192,8 +1196,14 @@ impl Tally {
 
     fn reset_for_new_file(&mut self) {
         self.position = 0.0;
+        self.furthest_position = 0.0;
         self.duration = 0.0;
+        self.completion_recorded = false;
         self.last_tick = None;
+    }
+
+    fn reached_watched_threshold(&self) -> bool {
+        self.duration > 0.0 && self.furthest_position / self.duration >= WATCHED_THRESHOLD
     }
 }
 
@@ -1213,13 +1223,28 @@ fn flush(
     series_id: &str,
     _session_id: &str,
     t: &mut Tally,
+    handle: &MpvHandle,
+    data_dir: &PathBuf,
 ) {
     let delta = t.accumulated - t.written;
+    let reached = t.reached_watched_threshold();
+    let mark_watched = reached && !t.completion_recorded;
+    let resume_ms = if reached { 0 } else { (t.position * 1000.0) as i64 };
     let conn = db.lock();
-    let _ = conn.execute(
-        "UPDATE episodes SET watched_ms = ?1, last_watched_at = datetime('now') WHERE id = ?2",
-        params![(t.position * 1000.0) as i64, episode_id],
-    );
+    let newly_recorded = match conn.execute(
+        "UPDATE episodes SET watched_ms = ?1, last_watched_at = datetime('now'),
+             watched = CASE WHEN ?3 THEN 1 ELSE watched END WHERE id = ?2",
+        params![resume_ms, episode_id, mark_watched],
+    ) {
+        Ok(rows) => mark_watched && rows > 0,
+        Err(error) => {
+            log::warn!("保存影视观看进度失败（{episode_id}）：{error}");
+            false
+        }
+    };
+    if newly_recorded {
+        t.completion_recorded = true;
+    }
     if delta >= 1.0 {
         let _ = conn.execute(
             "UPDATE series SET total_seconds = total_seconds + ?1 WHERE id = ?2",
@@ -1229,6 +1254,10 @@ fn flush(
     }
     drop(conn);
 
+    if newly_recorded {
+        // 已看状态落库后同步播放器列表；后续续播无需持久化最远位置也能保住判定。
+        refresh_playlist_meta_entry(handle, data_dir, episode_id, Some(true), Some(0));
+    }
     let _ = app.emit(
         "watch-progress",
         ProgressPayload {
@@ -1254,11 +1283,12 @@ fn rotate_to(
     session_id: &mut String,
     t: &mut Tally,
     pos: usize,
+    data_dir: &PathBuf,
 ) {
     // last_tick 为空说明还没真正开始播（首个文件），position 还是 0，
     // 这时候 flush 会把续播点清成 0
     if t.last_tick.is_some() {
-        flush(db, app, episode_id, label, series_id, session_id, t);
+        flush(db, app, episode_id, label, series_id, session_id, t, handle, data_dir);
     }
     let target_id = {
         let guard = handle.lock();
@@ -1529,6 +1559,7 @@ fn spawn_reader(
                                 log::debug!("[diag] reader 首次收到 time-pos={}", pos);
                             }
                             t.position = pos;
+                            t.furthest_position = t.furthest_position.max(pos);
                             let now = Instant::now();
                             if let Some(prev) = t.last_tick {
                                 let dt = now.duration_since(prev).as_secs_f64();
@@ -1586,7 +1617,7 @@ fn spawn_reader(
                                 if mode() == SessionMode::Music {
                                     flush_music(&db, &episode_id, &session_id, &mut t);
                                 } else {
-                                    flush(&db, &app, &episode_id, &label, &series_id, &session_id, &mut t);
+                                    flush(&db, &app, &episode_id, &label, &series_id, &session_id, &mut t, &handle, &data_dir);
                                 }
                             }
                         }
@@ -1649,11 +1680,11 @@ fn spawn_reader(
                                     // rotate_to 会把 episode_id 改成新集，离开的那一集
                                     // 要在轮换前记下来
                                     let left_id = episode_id.clone();
-                                    let left_ms = (t.position * 1000.0) as i64;
+                                    let left_ms = if t.reached_watched_threshold() { 0 } else { (t.position * 1000.0) as i64 };
                                     rotate_to(
                                         &db, &app, &handle,
                                         &mut episode_id, &mut label, &mut series_id, &mut session_id,
-                                        &mut t, pos,
+                                        &mut t, pos, &data_dir,
                                     );
                                     // 离开的那一集刚 flush 过续播位置 —— 同步进边车，
                                     // 抽屉里的进度条才是最新的。只有这一项变了，不必重建整季
@@ -1736,7 +1767,11 @@ fn spawn_reader(
 
                 Some("end-file") => {
                     let reason = v.get("reason").and_then(Value::as_str).unwrap_or("");
-                    flush(&db, &app, &episode_id, &label, &series_id, &session_id, &mut t);
+                    if mode() == SessionMode::Music {
+                        flush_music(&db, &episode_id, &session_id, &mut t);
+                    } else {
+                        flush(&db, &app, &episode_id, &label, &series_id, &session_id, &mut t, &handle, &data_dir);
+                    }
                     // mpv 正在退出（点叉 / Esc / ZEX 调 quit）：立刻把 ZEX 唤回。
                     // 此刻窗口还在、进程还没退，唤回与拆除并行 → 不再闪桌面。
                     // 最终结算（收尾 flush / 关会话）仍交给 EOF 分支做
@@ -1805,20 +1840,18 @@ fn spawn_reader(
 
                 _ => {}
             }
+            // time-pos 与 duration 的到达顺序不固定；两者齐备后立即持久化一次已看。
+            // 因而到过 90% 后即使回退、切集或下次再打开，也不会丢失已看标记。
+            if mode() == SessionMode::Video && t.reached_watched_threshold() && !t.completion_recorded {
+                flush(&db, &app, &episode_id, &label, &series_id, &session_id, &mut t, &handle, &data_dir);
+            }
         }
 
         // 管道读到 EOF = mpv 进程没了。做最后一次结算并把 ZEX 窗口唤回来
         if mode() == SessionMode::Music {
             flush_music(&db, &episode_id, &session_id, &mut t);
         } else {
-            flush(&db, &app, &episode_id, &label, &series_id, &session_id, &mut t);
-        }
-        if mode() == SessionMode::Video && t.duration > 0.0 && t.position / t.duration >= WATCHED_THRESHOLD {
-            let conn = db.lock();
-            let _ = conn.execute(
-                "UPDATE episodes SET watched = 1, watched_ms = 0 WHERE id = ?1",
-                [&episode_id],
-            );
+            flush(&db, &app, &episode_id, &label, &series_id, &session_id, &mut t, &handle, &data_dir);
         }
         {
             // mode() 内部要拿 mpv 锁，必须在 db.lock() **之前**求值 —— 否则本线程

@@ -1781,7 +1781,7 @@ pub fn run() {
             lyrics::set_desktop_lyrics_visible, lyrics::set_desktop_lyrics_locked, lyrics::set_lyrics_unlock_hotspot,
             show_main_window_cmd,
             // RTSS 帧数 OSD（随包便携 RTSS 驱动）
-            rtss::rtss_status, rtss::rtss_launch, rtss::rtss_open_download_page,
+            rtss::rtss_status, rtss::rtss_launch, rtss::rtss_stop, rtss::rtss_open_download_page,
             rtss::rtss_list_targets, rtss::rtss_read_profile, rtss::rtss_write_profile,
             rtss::rtss_clear_profile,
             rtss::rtss_default_profile,

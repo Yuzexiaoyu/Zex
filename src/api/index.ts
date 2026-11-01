@@ -699,6 +699,8 @@ export async function clearAllData(): Promise<string> {
 export interface RtssStatus {
   installed: boolean;
   running: boolean;
+  /** 主进程已退出，但后台组件尚未清理完；此时仍提供关闭重试 */
+  cleanup_pending: boolean;
   path: string | null;
 }
 
@@ -751,6 +753,11 @@ export async function rtssStatus(): Promise<RtssStatus> {
 
 export async function rtssLaunch(): Promise<RtssStatus> {
   return invoke('rtss_launch');
+}
+
+/** 手动关闭后，本次 ZEX 运行内不再自动拉起，直到再次手动启动或重启 ZEX */
+export async function rtssStop(): Promise<RtssStatus> {
+  return invoke('rtss_stop');
 }
 
 export async function rtssOpenDownloadPage(): Promise<void> {

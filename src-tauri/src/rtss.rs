@@ -10,7 +10,7 @@
 //!   清单是 requireAdministrator —— CreateProcessW（Command::spawn）启动必然
 //!   报 os error 740，只能走 ShellExecuteExW + runas；RTSS 自己还会写
 //!   HKLM\SOFTWARE\WOW6432Node\Unwinder\RTSS（InstallDir，Loader 靠它找 hook dll）
-//! - 共享内存 RTSSSharedMemoryV2（不带 Global\ 前缀）探测"RTSS 在跑"
+//! - 进程表判断运行/清理状态；共享内存和当前进程的回调窗口共同判断就绪
 //! - RTSS 提权运行（Medium IL 的 taskkill 一律 Access denied），但 ZEX 退出时仍能
 //!   销毁自己起的那个：见 RTSS_PROCESS。复用别人的 RTSS 时不碰。单实例=新实例退出
 //! - 注入交给 RTSS 内置的新进程钩子（2026-08-20 实测 OSD 正常显示）。别再想着自己调
@@ -36,19 +36,19 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
-use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, BOOL, TRUE, FALSE};
+use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, BOOL, TRUE, FALSE, WAIT_OBJECT_0};
 use windows_sys::Win32::Globalization::{WideCharToMultiByte, CP_ACP};
 use windows_sys::Win32::System::Memory::{
     OpenFileMappingW, MapViewOfFile, UnmapViewOfFile, FILE_MAP_READ, FILE_MAP_WRITE,
 };
-use windows_sys::Win32::System::Threading::{TerminateProcess, WaitForSingleObject};
+use windows_sys::Win32::System::Threading::{GetExitCodeProcess, TerminateProcess, WaitForSingleObject};
 use windows_sys::Win32::UI::Shell::{
     NOTIFYICONDATAW, NIM_DELETE, Shell_NotifyIconW, ShellExecuteExW, SHELLEXECUTEINFOW,
     SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindowTextW, GetWindowThreadProcessId, PostMessageW,
-    SW_HIDE, SW_SHOWMINNOACTIVE, WM_CLOSE,
+    EnumWindows, GetClassNameW, GetWindowTextW, GetWindowThreadProcessId, PostMessageW, SendMessageTimeoutW,
+    SMTO_ABORTIFHUNG, SMTO_BLOCK, SMTO_ERRORONEXIT, SW_HIDE, SW_SHOWMINNOACTIVE, WM_CLOSE, WM_NULL,
 };
 
 use crate::{AppError, AppResult, AppState};
@@ -61,6 +61,9 @@ const TRAY_WND_TITLE: &str = "RivaTunerStatisticsServer";
 const NID_CBSIZE: u32 = 0x1E8;
 // 预热/设置页路径等 RTSS 共享内存就绪的超时（都在后台跑，宽一点无妨）
 const READY_TIMEOUT: Duration = Duration::from_secs(5);
+// 手动关闭后等 RTSS.exe 退出的超时。taskkill 返回时进程可能还在收尾，
+// 立刻采样会把「正在关闭」误判成「仍在运行」
+const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 // launch_game 同步门的上限（2026-09-20 用户定的 2 秒快速超时）：常态下预热
 // 已把 RTSS 拉起，门只零等待地过一下；只在预热没赶上/失败时兜底。等不到就
 // 放行游戏 —— 那一次没 OSD，RTSS 后到补注入弹的警告框由收尾线程关掉
@@ -91,8 +94,11 @@ static RTSS_PROCESS: AtomicUsize = AtomicUsize::new(0);
 /// （新进程会重建图标）
 static RTSS_CLEANED: AtomicBool = AtomicBool::new(false);
 
-/// 只护「spawn RTSS 一下」这个动作：预热线程和 launch_game 的同步门可能同时
-/// 发现 RTSS 没在跑，各自 spawn 会白弹一次 UAC（第二个实例自退，框却弹两次）
+/// 用户在本次 ZEX 运行中明确关闭 RTSS 后，禁止预热、配置落盘和游戏启动门
+/// 再把它自动拉起。只存内存：手动启动时解除，重启 ZEX 后自然复位。
+static RTSS_MANUAL_STOP: AtomicBool = AtomicBool::new(false);
+
+/// 串行化启动与关闭；自动入口只 try_lock，避免游戏门等待另一线程的 UAC。
 static RTSS_START_LOCK: Mutex<()> = Mutex::new(());
 
 // ─────────────────────────────────────────────
@@ -103,8 +109,10 @@ static RTSS_START_LOCK: Mutex<()> = Mutex::new(());
 pub struct RtssStatus {
     /// 随包 RTSS 是否就位（rtss/RTSS.exe 存在）
     pub installed: bool,
-    /// RTSS 是否在跑（共享内存探测，进程名/PID 都不可靠：RTSS 自提权重启、隐藏 PEB 路径）
+    /// RTSS.exe 主进程是否存在，不以可能残留的共享内存判断。
     pub running: bool,
+    /// 主进程已退出，但注入宿主仍在运行；面板应继续提供关闭重试。
+    pub cleanup_pending: bool,
     /// rtss 目录绝对路径（未安装时为 None）
     pub path: Option<String>,
 }
@@ -271,8 +279,9 @@ fn resolve_rtss(app: &AppHandle) -> Option<PathBuf> {
 // 共享内存探测（RTSS 在跑？）
 // ─────────────────────────────────────────────
 
-/// RTSSSharedMemoryV2 可打开 = RTSS 在跑。RTSS 整个生命周期都在（进程保护
-/// 下共享内存一直有效），比进程名匹配可靠得多
+/// RTSSSharedMemoryV2 是否存在（仅为就绪判断的一部分）。
+/// 注意：命名共享段在最后一个句柄关闭前一直存在，注入过的游戏/ZEX 自己加载的
+/// RTSSHooks64.dll 都可能拖住它，所以**不能**把它单独当作进程仍在运行的证据。
 fn rtss_running() -> bool {
     let wide: Vec<u16> = SHARED_MEM_NAME.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
@@ -282,6 +291,91 @@ fn rtss_running() -> bool {
         }
         CloseHandle(handle);
         true
+    }
+}
+
+#[derive(Debug, Default)]
+struct RtssProcesses {
+    main_pids: Vec<u32>,
+    loader_images: Vec<&'static str>,
+}
+
+impl RtssProcesses {
+    fn running(&self) -> bool {
+        !self.main_pids.is_empty()
+    }
+
+    fn images(&self) -> Vec<&'static str> {
+        let mut images = Vec::new();
+        if self.running() {
+            images.push("RTSS.exe");
+        }
+        images.extend(self.loader_images.iter().copied());
+        images
+    }
+}
+
+/// 一次采样同时收集主进程及 32/64 位注入宿主，避免关闭结果漏掉残留组件。
+fn rtss_processes() -> RtssProcesses {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    let mut processes = RtssProcesses::default();
+    for process in sys.processes().values() {
+        let name = process.name().to_string_lossy();
+        if name.eq_ignore_ascii_case("RTSS.exe") {
+            processes.main_pids.push(process.pid().as_u32());
+        } else if let Some(image) = ["RTSSHooksLoader.exe", "RTSSHooksLoader64.exe"]
+            .into_iter().find(|image| name.eq_ignore_ascii_case(image))
+        {
+            if !processes.loader_images.contains(&image) {
+                processes.loader_images.push(image);
+            }
+        }
+    }
+    processes
+}
+
+fn rtss_process_running() -> bool {
+    rtss_processes().running()
+}
+
+fn current_rtss_status(dir: Option<&Path>) -> RtssStatus {
+    let processes = rtss_processes();
+    let running = processes.running();
+    RtssStatus {
+        installed: dir.is_some(),
+        running,
+        cleanup_pending: !running && !processes.loader_images.is_empty(),
+        path: dir.map(|p| p.to_string_lossy().to_string()),
+    }
+}
+
+/// 残留映射不能证明新实例就绪：还须找到当前 PID 的 RTSS 窗口，并确认其已响应消息。
+fn rtss_ready() -> bool {
+    if !rtss_running() {
+        return false;
+    }
+    rtss_processes().main_pids.into_iter().any(|pid| {
+        let Some(window) = scan_rtss_windows(pid).0 else { return false };
+        let mut result = 0;
+        unsafe {
+            SendMessageTimeoutW(
+                window, WM_NULL, 0, 0,
+                SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT, 100, &mut result,
+            ) != 0
+        }
+    })
+}
+
+/// 主进程和注入宿主都退出才算关闭完成。共享内存可能被游戏继续持有，不等待它释放。
+fn wait_until_rtss_stopped(timeout: Duration) -> RtssProcesses {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let processes = rtss_processes();
+        if processes.images().is_empty() || Instant::now() >= deadline {
+            return processes;
+        }
+        std::thread::sleep(Duration::from_millis(150));
     }
 }
 
@@ -896,7 +990,7 @@ fn config_from_maps(
 /// 启动 RTSS.exe。必须走 ShellExecuteEx —— RTSS.exe 的清单是
 /// requireAdministrator，CreateProcessW（Rust 的 Command::spawn）不会提权，
 /// 一律返回 os error 740 ERROR_ELEVATION_REQUIRED。只有 shell 这条路能触发提权
-fn shell_execute_rtss(exe: &Path) -> bool {
+fn shell_execute_rtss(exe: &Path) -> AppResult<()> {
     let wide = |s: &std::ffi::OsStr| -> Vec<u16> {
         s.encode_wide().chain(std::iter::once(0)).collect()
     };
@@ -913,10 +1007,10 @@ fn shell_execute_rtss(exe: &Path) -> bool {
     info.lpDirectory = dir.as_ref().map_or(ptr::null(), |d| d.as_ptr());
     info.nShow = SW_SHOWMINNOACTIVE;
 
-    let ok = unsafe { ShellExecuteExW(&mut info) != 0 };
-    if !ok {
-        log::warn!("RTSS 启动失败（{}）：{}", exe.display(), std::io::Error::last_os_error());
-    } else if !info.hProcess.is_null() {
+    if unsafe { ShellExecuteExW(&mut info) } == 0 {
+        return Err(AppError::Custom(format!("RTSS 启动未完成：{}", std::io::Error::last_os_error())));
+    }
+    if !info.hProcess.is_null() {
         // 留住句柄给退出时销毁用（见 RTSS_PROCESS）。用 runas 起的 RTSS 已经是提权
         // 状态，不会再自提权重启换 PID，所以这个句柄指向的就是最终那个进程（实测）
         let prev = RTSS_PROCESS.swap(info.hProcess as usize, Ordering::SeqCst);
@@ -924,25 +1018,22 @@ fn shell_execute_rtss(exe: &Path) -> bool {
             unsafe { CloseHandle(prev as _) };
         }
     }
-    ok
+    Ok(())
 }
 
-/// 收掉 RTSS 留下的 RTSSHooksLoader64.exe。
-///
-/// 这个进程是 RTSS 自己拉起来的 64 位注入宿主，继承了 RTSS 的高完整性级别 ——
-/// 和 RTSS 本体不同，ZEX 手里没有它的句柄，Medium IL 的 OpenProcess 一律
-/// Access denied（实测），所以只能借一次提权 taskkill。硬杀 RTSS 之后它不会
-/// 自己退出（实测父进程没了还常驻），不收就是每次 RTSS 启动残留一个闲置进程。
-///
-/// 代价：默认 UAC 的机器上退出时会多弹一次同意框（本机 ConsentPromptBehaviorAdmin=0
-/// 静默）。这是唯一能跨完整性级别杀它的办法，Job Object 那条路试过 ——
-/// AssignProcessToJobObject 对提权进程失败，整棵树收不掉
-fn kill_hooks_loader() {
+/// 借一次提权 taskkill 收掉高完整性进程。ZEX 手里没有这些进程的句柄时，
+/// Medium IL 的 OpenProcess 会 Access denied，只能走 runas。
+fn kill_elevated_images(images: &[&str]) -> AppResult<()> {
+    if images.is_empty() {
+        return Ok(());
+    }
     let file: Vec<u16> = "taskkill.exe".encode_utf16().chain(std::iter::once(0)).collect();
-    let params: Vec<u16> = "/F /IM RTSSHooksLoader64.exe"
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let args = images.iter().fold("/F".to_string(), |mut s, image| {
+        s.push_str(" /IM ");
+        s.push_str(image);
+        s
+    });
+    let params: Vec<u16> = args.encode_utf16().chain(std::iter::once(0)).collect();
     let verb: Vec<u16> = "runas".encode_utf16().chain(std::iter::once(0)).collect();
 
     let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
@@ -954,34 +1045,99 @@ fn kill_hooks_loader() {
     info.nShow = SW_HIDE;
 
     if unsafe { ShellExecuteExW(&mut info) } == 0 {
-        log::warn!("清理 RTSSHooksLoader64 失败：{}", std::io::Error::last_os_error());
-        return;
+        return Err(AppError::Custom(format!("RTSS 进程清理未完成：{}", std::io::Error::last_os_error())));
     }
-    if !info.hProcess.is_null() {
-        // 等 taskkill 跑完再放行（提权进程由 AppInfo 服务创建，不是 ZEX 的子进程，
-        // 不等也能活到最后；等一下只是让"退出即干净"可预期）。3 秒够了，
-        // 卡在 UAC 同意框上也不至于把退出流程拖住
-        unsafe {
-            WaitForSingleObject(info.hProcess, 3000);
-            CloseHandle(info.hProcess);
+    if info.hProcess.is_null() {
+        return Err(AppError::Custom("未取得 RTSS 清理进程句柄".to_string()));
+    }
+    // NOASYNC 的 ShellExecuteEx 本身可能等待 UAC；这里的超时只约束已创建的 taskkill。
+    let wait = unsafe { WaitForSingleObject(info.hProcess, 3000) };
+    let mut exit_code = 0;
+    let exit_ok = wait == WAIT_OBJECT_0
+        && unsafe { GetExitCodeProcess(info.hProcess, &mut exit_code) } != 0;
+    unsafe { CloseHandle(info.hProcess) };
+    if !exit_ok {
+        return Err(AppError::Custom("等待 RTSS 清理进程完成失败或超时".to_string()));
+    }
+    if exit_code != 0 {
+        return Err(AppError::Custom(format!("RTSS 清理进程返回错误码 {exit_code}")));
+    }
+    Ok(())
+}
+
+/// 收掉 RTSS 留下的 RTSSHooksLoader64.exe。
+///
+/// 这个进程是 RTSS 自己拉起来的 64 位注入宿主，继承了 RTSS 的高完整性级别。
+/// 硬杀 RTSS 之后它不会自己退出（实测父进程没了还常驻），不收就是每次 RTSS
+/// 启动残留一个闲置进程。Job Object 也试过：AssignProcessToJobObject 对提权
+/// 进程失败，整棵树收不掉，所以只能借提权 taskkill。
+fn kill_hooks_loader() -> AppResult<()> {
+    kill_elevated_images(&rtss_processes().loader_images)
+}
+
+/// 调用方持有启动锁。只在确认进程退出后释放句柄，失败时保留所有权以便重试。
+fn terminate_owned_rtss() -> AppResult<bool> {
+    let handle = RTSS_PROCESS.load(Ordering::SeqCst);
+    if handle == 0 {
+        return Ok(false);
+    }
+    unsafe {
+        if WaitForSingleObject(handle as _, 0) != WAIT_OBJECT_0 {
+            if TerminateProcess(handle as _, 0) == 0 {
+                let error = std::io::Error::last_os_error();
+                // 进程恰好自己退出时 TerminateProcess 也可能返回拒绝访问。
+                if WaitForSingleObject(handle as _, 0) != WAIT_OBJECT_0 {
+                    return Err(AppError::Custom(format!("结束 RTSS 主进程失败：{error}")));
+                }
+            }
+            if WaitForSingleObject(handle as _, 3000) != WAIT_OBJECT_0 {
+                return Err(AppError::Custom("等待 RTSS 主进程退出失败或超时".to_string()));
+            }
         }
+        RTSS_PROCESS.store(0, Ordering::SeqCst);
+        CloseHandle(handle as _);
+    }
+    Ok(true)
+}
+
+/// 销毁 ZEX 自己拉起的 RTSS（ZEX 退出、配置全部关闭时调用，语义同 mpv::shutdown_all）。
+/// 没有句柄 = RTSS 是别人起的、我们只是复用，直接放过（连它的 loader 一起不碰）
+pub fn shutdown_rtss() {
+    let _guard = RTSS_START_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // 下次再起是全新进程，托盘图标会重建，收尾标志复位
+    RTSS_CLEANED.store(false, Ordering::SeqCst);
+    let result = terminate_owned_rtss().and_then(|owned| {
+        if owned { kill_hooks_loader() } else { Ok(()) }
+    });
+    if let Err(error) = result {
+        log::warn!("RTSS 自动关闭未完成：{error}");
     }
 }
 
-/// 销毁 ZEX 自己拉起的 RTSS（托盘「退出」时调用，语义同 mpv::shutdown_all）。
-/// 没有句柄 = RTSS 是别人起的、我们只是复用，直接放过（连它的 loader 一起不碰）
-pub fn shutdown_rtss() {
-    let handle = RTSS_PROCESS.swap(0, Ordering::SeqCst);
-    if handle == 0 {
-        return;
-    }
-    // 下次再起是全新进程，托盘图标会重建，收尾标志复位
+/// 用户在面板上明确点「关闭」时，不复用 ZEX 退出时的所有权限制：即便当前
+/// RTSS 是预先已在跑、被 ZEX 接管的，也按用户的明确指令关掉它和 loader。
+fn shutdown_rtss_manually() -> AppResult<()> {
+    let direct_error = terminate_owned_rtss().err();
     RTSS_CLEANED.store(false, Ordering::SeqCst);
-    unsafe {
-        TerminateProcess(handle as _, 0);
-        CloseHandle(handle as _);
+    // 只结束仍然存在的映像。主进程终止失败时与 Loader 合并为一次 UAC，避免重复提权。
+    let images = rtss_processes().images();
+    let cleanup = kill_elevated_images(&images);
+    let remaining = if cleanup.is_ok() {
+        wait_until_rtss_stopped(STOP_TIMEOUT)
+    } else {
+        rtss_processes()
+    };
+    let remaining_images = remaining.images();
+    if !remaining_images.is_empty() {
+        let detail = cleanup.err().or(direct_error).map(|e| format!("；{e}")).unwrap_or_default();
+        return Err(AppError::Custom(format!("RTSS 尚未完全关闭：{}{detail}", remaining_images.join(", "))));
     }
-    kill_hooks_loader();
+    // 提权兜底可能收掉了之前直接终止失败的进程，此时也要释放旧句柄。
+    let handle = RTSS_PROCESS.swap(0, Ordering::SeqCst);
+    if handle != 0 {
+        unsafe { CloseHandle(handle as _) };
+    }
+    Ok(())
 }
 
 // 确保就绪（launch_game 挂钩 + 设置页共用）
@@ -995,32 +1151,49 @@ pub fn ensure_rtss_running(app: &AppHandle) -> AppResult<RtssStatus> {
 
 fn ensure_rtss_running_with(app: &AppHandle, timeout: Duration) -> AppResult<RtssStatus> {
     let Some(rtss_dir) = resolve_rtss(app) else {
-        return Ok(RtssStatus { installed: false, running: false, path: None });
+        return Ok(current_rtss_status(None));
     };
+    // 用户手动关闭后，预热、配置落盘、游戏启动门全部只报告状态，不再拉起。
+    // 唯一解除入口是 rtss_launch；标记只在本进程内存里，重启 ZEX 自动复位。
+    if RTSS_MANUAL_STOP.load(Ordering::SeqCst) {
+        return Ok(current_rtss_status(Some(&rtss_dir)));
+    }
     // 锁只护 spawn 一瞬（见 RTSS_START_LOCK）。拿不到锁 = 预热/另一条门正在
     // 拉起（runas 的 UAC 同意框会把 spawn 卡到用户点完为止），跳过 spawn 直接连
     // 着等共享内存就行 —— 门有 2 秒上限，不能被别人的锁内等待拖住
     if let Ok(_guard) = RTSS_START_LOCK.try_lock() {
-        if !rtss_running() {
-            // 新进程会重建托盘图标，收尾标志复位
-            RTSS_CLEANED.store(false, Ordering::Relaxed);
-            // 启动失败不算致命（可能恰好正在提权重启），统一走共享内存轮询
-            shell_execute_rtss(&rtss_dir.join("RTSS.exe"));
+        if !RTSS_MANUAL_STOP.load(Ordering::SeqCst) {
+            start_rtss_if_missing(&rtss_dir)?;
         }
     }
+    wait_for_rtss_ready(&rtss_dir, timeout)
+}
+
+/// 调用方持有启动锁。已有进程可能仍在初始化，不能因此重复启动并覆盖自有句柄。
+fn start_rtss_if_missing(rtss_dir: &Path) -> AppResult<()> {
+    if !rtss_process_running() {
+        RTSS_CLEANED.store(false, Ordering::SeqCst);
+        shell_execute_rtss(&rtss_dir.join("RTSS.exe"))?;
+    }
+    Ok(())
+}
+
+fn wait_for_rtss_ready(rtss_dir: &Path, timeout: Duration) -> AppResult<RtssStatus> {
     let deadline = Instant::now() + timeout;
-    while !rtss_running() && Instant::now() < deadline {
+    loop {
+        if RTSS_MANUAL_STOP.load(Ordering::SeqCst) {
+            return Ok(current_rtss_status(Some(rtss_dir)));
+        }
+        // 提前清理阻塞初始化的警告框，不能等窗口就绪后才排收尾。
+        schedule_cleanup_once();
+        if rtss_ready() {
+            return Ok(current_rtss_status(Some(rtss_dir)));
+        }
+        if Instant::now() >= deadline {
+            return Err(AppError::Custom("等待 RTSS 初始化就绪超时".to_string()));
+        }
         std::thread::sleep(Duration::from_millis(100));
     }
-    let running = rtss_running();
-    if running {
-        schedule_cleanup_once();
-    }
-    Ok(RtssStatus {
-        installed: true,
-        running,
-        path: Some(rtss_dir.to_string_lossy().to_string()),
-    })
 }
 
 /// 排一次后台收尾（关警告框 + 删托盘图标），收尾不占调用方时间。swap 抢占
@@ -1074,11 +1247,12 @@ pub fn ensure_osd_ready(app: &AppHandle, exe_path: &str, rtss_profile_name: &str
     if !profile_wants(&rtss_dir, exe_path, rtss_profile_name) {
         return;
     }
-    let was_running = rtss_running();
-    let _ = ensure_rtss_running_with(app, GATE_TIMEOUT);
+    // 旧进程残留的共享内存不能算「RTSS 已在跑」，否则会误判为不需要初始化余量
+    let was_ready = rtss_ready();
+    let ready = ensure_rtss_running_with(app, GATE_TIMEOUT);
     // 门自己拉起来的才给初始化余量：共享内存就绪 ≈ 核心已起，但新进程监视
     // 的布防时机没有文档可考，300ms 保险。RTSS 已在跑的常态路径零延迟
-    if !was_running && rtss_running() {
+    if !was_ready && ready.is_ok() && !RTSS_MANUAL_STOP.load(Ordering::SeqCst) && rtss_ready() {
         std::thread::sleep(Duration::from_millis(300));
     }
 }
@@ -1438,16 +1612,44 @@ fn require_rtss(app: &AppHandle) -> AppResult<PathBuf> {
 #[tauri::command(async)]
 pub fn rtss_status(app: AppHandle) -> AppResult<RtssStatus> {
     let dir = resolve_rtss(&app);
-    Ok(RtssStatus {
-        installed: dir.is_some(),
-        running: rtss_running(),
-        path: dir.map(|p| p.to_string_lossy().to_string()),
-    })
+    Ok(current_rtss_status(dir.as_deref()))
 }
 
 #[tauri::command(async)]
 pub fn rtss_launch(app: AppHandle) -> AppResult<RtssStatus> {
-    ensure_rtss_running(&app)
+    let dir = resolve_rtss(&app);
+    {
+        let _guard = RTSS_START_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // 只有用户明确点启动才解除禁令，且与关闭动作串行。
+        RTSS_MANUAL_STOP.store(false, Ordering::SeqCst);
+        if let Some(dir) = dir.as_deref() {
+            start_rtss_if_missing(dir)?;
+        }
+    }
+    match dir {
+        Some(dir) => wait_for_rtss_ready(&dir, READY_TIMEOUT),
+        None => Ok(current_rtss_status(None)),
+    }
+}
+
+#[tauri::command(async)]
+pub fn rtss_stop(app: AppHandle) -> AppResult<RtssStatus> {
+    // 先置禁令，再等同一把启动锁：若另一条线程正在 ShellExecuteEx/UAC 中，
+    // 它会先完成，随后这里立即收掉，不会出现「关了以后又被预热拉起」。
+    RTSS_MANUAL_STOP.store(true, Ordering::SeqCst);
+    let _guard = RTSS_START_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    RTSS_MANUAL_STOP.store(true, Ordering::SeqCst);
+    let processes_before = rtss_processes();
+    let mapping_before = rtss_running();
+    let result = shutdown_rtss_manually();
+    log::info!(
+        "RTSS 手动关闭：进程 {:?} → {:?}，共享内存 {mapping_before} → {}",
+        processes_before.images(),
+        rtss_processes().images(),
+        rtss_running()
+    );
+    result?;
+    rtss_status(app)
 }
 
 #[tauri::command(async)]

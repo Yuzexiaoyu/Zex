@@ -17,6 +17,10 @@ ZEX 是一款装在自己电脑上的游戏、影视、音乐三合一管理工�
 
 ![影视详情：以《权力的游戏》为例](docs/images/series-detail.jpg)
 
+**📺 分季选集** — 每一集的静帧、评分、时长与剧情简介逐行铺开
+
+![分季选集：静帧与剧情简介](docs/images/series-episodes.jpg)
+
 **🎵 音乐库** — 专辑与曲目一览
 
 ![音乐库：专辑封面与曲目列表](docs/images/music-library.jpg)
